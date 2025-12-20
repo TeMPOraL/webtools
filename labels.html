@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>The Debullshittified Label Printer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>The Debullshittified Label Printer</title>
     <style>
         :root {
             /* A4 Dimensions */
             --page-width: 210mm;
-            --page-height: 296mm; /* Slightly less than 297 to prevent overflow blank pages */
+            --page-height: 296mm; 
         }
 
         body {
@@ -29,6 +29,23 @@
 
         .ui-panel h2 { margin-top: 0; }
         
+        /* Editor Toolbar */
+        .editor-toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 5px;
+            align-items: center;
+        }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 13px;
+            background: #e0e0e0;
+            color: #333;
+            border: 1px solid #ccc;
+        }
+        .btn-sm:hover { background: #d0d0d0; }
+
         textarea {
             width: 100%;
             height: 150px;
@@ -37,11 +54,14 @@
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
+            box-sizing: border-box; /* Ensures padding doesn't break width */
+            white-space: pre; /* Important for visualizing tabs */
+            overflow-x: auto;
         }
 
         .controls {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
         }
@@ -64,7 +84,7 @@
             border-radius: 4px;
         }
 
-        button {
+        .btn-primary {
             background: #007bff;
             color: white;
             border: none;
@@ -73,9 +93,10 @@
             cursor: pointer;
             font-size: 16px;
             font-weight: bold;
+            width: 100%;
         }
 
-        button:hover { background: #0056b3; }
+        .btn-primary:hover { background: #0056b3; }
 
         /* --- PRINT STYLES --- */
         #output {
@@ -88,14 +109,8 @@
             background: white;
             width: var(--page-width);
             height: var(--page-height);
-            /* This makes the grid layout logic */
             display: grid;
-            /* These will be set by JS */
-            /* grid-template-columns: repeat(3, 1fr); */
-            /* grid-template-rows: repeat(8, 1fr); */
             box-sizing: border-box;
-            
-            /* Visualizing sheets on screen */
             margin-bottom: 20px;
             box-shadow: 0 0 10px rgba(0,0,0,0.2);
             position: relative;
@@ -104,15 +119,14 @@
         .label-cell {
             display: flex;
             flex-direction: column;
-            justify-content: center; /* Center vertically in the label */
-            align-items: flex-start; /* Left align text */
+            justify-content: center; 
+            align-items: flex-start; 
             overflow: hidden;
-            padding: 5mm; /* Inner padding of the label */
+            padding: 5mm; 
             box-sizing: border-box;
             word-wrap: break-word;
         }
         
-        /* Optional: Toggle this to see label boundaries for debugging */
         .show-outlines .label-cell {
             border: 1px dashed #ccc;
         }
@@ -136,7 +150,6 @@
                 break-after: page;
                 page-break-after: always;
             }
-            /* Remove outlines when printing unless specifically desired */
             .show-outlines .label-cell {
                 border: none;
             }
@@ -147,7 +160,12 @@
 
     <div class="ui-panel no-print">
         <h2>Label Debullshittifier</h2>
-        <p>Paste your data below (from Excel/Sheets). 1 Row = 1 Label.</p>
+        <p>Paste your data below. 1 Row = 1 Label.</p>
+        
+        <div class="editor-toolbar">
+            <button class="btn-sm" onclick="insertTab()">⇥ Insert Tab</button>
+            <span style="font-size: 12px; color: #666;">(Use to separate columns)</span>
+        </div>
         
         <textarea id="inputData" placeholder="Name&#9;Address&#9;City&#10;John Doe&#9;123 Fake St&#9;New York..."></textarea>
 
@@ -161,11 +179,11 @@
                 <input type="number" id="rows" value="8">
             </div>
             <div class="control-group">
-                <label>Sheet Padding Top/Bot (mm)</label>
+                <label>Sheet Padding Y (mm)</label>
                 <input type="number" id="padY" value="12">
             </div>
             <div class="control-group">
-                <label>Sheet Padding Left/Right (mm)</label>
+                <label>Sheet Padding X (mm)</label>
                 <input type="number" id="padX" value="5">
             </div>
              <div class="control-group">
@@ -176,16 +194,31 @@
         
         <div style="margin-bottom: 15px;">
             <label style="display:inline-flex; align-items:center; gap:5px;">
-                <input type="checkbox" id="showOutlines" checked> Show Grid Lines (Helpful for checking alignment, hidden on print)
+                <input type="checkbox" id="showOutlines" checked> Show Grid Lines (Hidden on print)
             </label>
         </div>
 
-        <button onclick="generateLabels()">Generate Labels</button>
+        <button class="btn-primary" onclick="generateLabels()">Generate Labels</button>
     </div>
 
     <div id="output"></div>
 
     <script>
+        function insertTab() {
+            const textarea = document.getElementById('inputData');
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+
+            // Insert the tab char
+            textarea.value = textarea.value.substring(0, start) + "\t" + textarea.value.substring(end);
+
+            // Move caret to after the tab
+            textarea.selectionStart = textarea.selectionEnd = start + 1;
+            
+            // Focus back so user can keep typing
+            textarea.focus();
+        }
+
         function generateLabels() {
             const rawData = document.getElementById('inputData').value.trim();
             const cols = parseInt(document.getElementById('cols').value);
@@ -196,32 +229,27 @@
             const showOutlines = document.getElementById('showOutlines').checked;
 
             const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML = ''; // Clear previous
+            outputDiv.innerHTML = ''; 
             
             if (showOutlines) outputDiv.classList.add('show-outlines');
             else outputDiv.classList.remove('show-outlines');
 
             if (!rawData) return;
 
-            // Parse TSV
-            // Split by newline, then split by tab
             const dataRows = rawData.split(/\n/).map(row => row.split(/\t/));
             
             const labelsPerPage = cols * rows;
             const totalPages = Math.ceil(dataRows.length / labelsPerPage);
 
             for (let p = 0; p < totalPages; p++) {
-                // Create a page (Sheet)
                 const sheet = document.createElement('div');
                 sheet.className = 'sheet';
                 
-                // Configure Grid
                 sheet.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
                 sheet.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
                 sheet.style.padding = `${padY}mm ${padX}mm`;
                 sheet.style.fontSize = `${fontSize}px`;
 
-                // Fill Page with Labels
                 const startIdx = p * labelsPerPage;
                 const endIdx = Math.min(startIdx + labelsPerPage, dataRows.length);
 
@@ -230,9 +258,7 @@
                     const labelCell = document.createElement('div');
                     labelCell.className = 'label-cell';
                     
-                    // Render each column in the row as a new line
                     rowData.forEach(text => {
-                        // clear empty quotes often found in bad csv pastes
                         let cleanText = text.replace(/^"|"$/g, '').trim(); 
                         if(cleanText) {
                             const line = document.createElement('div');
@@ -244,7 +270,6 @@
 
                     sheet.appendChild(labelCell);
                 }
-
                 outputDiv.appendChild(sheet);
             }
         }
