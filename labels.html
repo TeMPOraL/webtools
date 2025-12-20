@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>The Debullshittified Label Printer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Debullshittified Label Printer</title>
     <style>
         :root {
-            /* A4 Dimensions */
             --page-width: 210mm;
-            --page-height: 296mm; 
+            --page-height: 297mm; /* Full A4 */
         }
 
         body {
@@ -29,7 +29,6 @@
 
         .ui-panel h2 { margin-top: 0; }
         
-        /* Editor Toolbar */
         .editor-toolbar {
             display: flex;
             gap: 10px;
@@ -43,6 +42,7 @@
             background: #e0e0e0;
             color: #333;
             border: 1px solid #ccc;
+            cursor: pointer;
         }
         .btn-sm:hover { background: #d0d0d0; }
 
@@ -54,14 +54,14 @@
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
-            box-sizing: border-box; /* Ensures padding doesn't break width */
-            white-space: pre; /* Important for visualizing tabs */
+            box-sizing: border-box;
+            white-space: pre;
             overflow-x: auto;
         }
 
         .controls {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
         }
@@ -99,6 +99,13 @@
         .btn-primary:hover { background: #0056b3; }
 
         /* --- PRINT STYLES --- */
+        
+        /* This forces the browser to remove headers/footers and margins */
+        @page {
+            margin: 0;
+            size: auto;
+        }
+
         #output {
             display: flex;
             flex-direction: column;
@@ -111,6 +118,8 @@
             height: var(--page-height);
             display: grid;
             box-sizing: border-box;
+            
+            /* Visual separation on screen */
             margin-bottom: 20px;
             box-shadow: 0 0 10px rgba(0,0,0,0.2);
             position: relative;
@@ -122,13 +131,13 @@
             justify-content: center; 
             align-items: flex-start; 
             overflow: hidden;
-            padding: 5mm; 
             box-sizing: border-box;
             word-wrap: break-word;
+            /* Padding is set via JS now */
         }
         
         .show-outlines .label-cell {
-            border: 1px dashed #ccc;
+            outline: 1px dashed #e0e0e0; /* Use outline so it doesn't add width */
         }
 
         .label-line {
@@ -151,7 +160,7 @@
                 page-break-after: always;
             }
             .show-outlines .label-cell {
-                border: none;
+                outline: none;
             }
         }
     </style>
@@ -160,7 +169,7 @@
 
     <div class="ui-panel no-print">
         <h2>Label Debullshittifier</h2>
-        <p>Paste your data below. 1 Row = 1 Label.</p>
+        <p>Paste data. 1 Row = 1 Label.</p>
         
         <div class="editor-toolbar">
             <button class="btn-sm" onclick="insertTab()">⇥ Insert Tab</button>
@@ -171,20 +180,26 @@
 
         <div class="controls">
             <div class="control-group">
-                <label>Columns per Page</label>
+                <label>Columns (Grid)</label>
                 <input type="number" id="cols" value="3">
             </div>
             <div class="control-group">
-                <label>Rows per Page</label>
+                <label>Rows (Grid)</label>
                 <input type="number" id="rows" value="8">
             </div>
+            
             <div class="control-group">
                 <label>Sheet Padding Y (mm)</label>
-                <input type="number" id="padY" value="12">
+                <input type="number" id="padY" value="0">
             </div>
             <div class="control-group">
                 <label>Sheet Padding X (mm)</label>
-                <input type="number" id="padX" value="5">
+                <input type="number" id="padX" value="0">
+            </div>
+
+            <div class="control-group">
+                <label>Label Inner Padding (mm)</label>
+                <input type="number" id="innerPad" value="5">
             </div>
              <div class="control-group">
                 <label>Font Size (px)</label>
@@ -208,14 +223,8 @@
             const textarea = document.getElementById('inputData');
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
-
-            // Insert the tab char
             textarea.value = textarea.value.substring(0, start) + "\t" + textarea.value.substring(end);
-
-            // Move caret to after the tab
             textarea.selectionStart = textarea.selectionEnd = start + 1;
-            
-            // Focus back so user can keep typing
             textarea.focus();
         }
 
@@ -223,8 +232,14 @@
             const rawData = document.getElementById('inputData').value.trim();
             const cols = parseInt(document.getElementById('cols').value);
             const rows = parseInt(document.getElementById('rows').value);
+            
+            // Sheet Padding (Outside the grid)
             const padY = document.getElementById('padY').value;
             const padX = document.getElementById('padX').value;
+            
+            // Inner Padding (Inside the label)
+            const innerPad = document.getElementById('innerPad').value;
+            
             const fontSize = document.getElementById('fontSize').value;
             const showOutlines = document.getElementById('showOutlines').checked;
 
@@ -237,7 +252,6 @@
             if (!rawData) return;
 
             const dataRows = rawData.split(/\n/).map(row => row.split(/\t/));
-            
             const labelsPerPage = cols * rows;
             const totalPages = Math.ceil(dataRows.length / labelsPerPage);
 
@@ -257,6 +271,7 @@
                     const rowData = dataRows[i];
                     const labelCell = document.createElement('div');
                     labelCell.className = 'label-cell';
+                    labelCell.style.padding = `${innerPad}mm`;
                     
                     rowData.forEach(text => {
                         let cleanText = text.replace(/^"|"$/g, '').trim(); 
