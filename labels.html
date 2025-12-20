@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Debullshittified Label Printer</title>
+    <style>
+        :root {
+            /* A4 Dimensions */
+            --page-width: 210mm;
+            --page-height: 296mm; /* Slightly less than 297 to prevent overflow blank pages */
+        }
+
+        body {
+            font-family: sans-serif;
+            background: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* --- UI STYLES (Hidden when printing) --- */
+        .ui-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 800px;
+            margin: 0 auto 30px auto;
+        }
+
+        .ui-panel h2 { margin-top: 0; }
+        
+        textarea {
+            width: 100%;
+            height: 150px;
+            margin-bottom: 10px;
+            font-family: monospace;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+        }
+
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        button:hover { background: #0056b3; }
+
+        /* --- PRINT STYLES --- */
+        #output {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .sheet {
+            background: white;
+            width: var(--page-width);
+            height: var(--page-height);
+            /* This makes the grid layout logic */
+            display: grid;
+            /* These will be set by JS */
+            /* grid-template-columns: repeat(3, 1fr); */
+            /* grid-template-rows: repeat(8, 1fr); */
+            box-sizing: border-box;
+            
+            /* Visualizing sheets on screen */
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            position: relative;
+        }
+
+        .label-cell {
+            display: flex;
+            flex-direction: column;
+            justify-content: center; /* Center vertically in the label */
+            align-items: flex-start; /* Left align text */
+            overflow: hidden;
+            padding: 5mm; /* Inner padding of the label */
+            box-sizing: border-box;
+            word-wrap: break-word;
+        }
+        
+        /* Optional: Toggle this to see label boundaries for debugging */
+        .show-outlines .label-cell {
+            border: 1px dashed #ccc;
+        }
+
+        .label-line {
+            margin: 2px 0;
+            line-height: 1.2;
+        }
+
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            .ui-panel {
+                display: none;
+            }
+            .sheet {
+                box-shadow: none;
+                margin-bottom: 0;
+                break-after: page;
+                page-break-after: always;
+            }
+            /* Remove outlines when printing unless specifically desired */
+            .show-outlines .label-cell {
+                border: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ui-panel no-print">
+        <h2>Label Debullshittifier</h2>
+        <p>Paste your data below (from Excel/Sheets). 1 Row = 1 Label.</p>
+        
+        <textarea id="inputData" placeholder="Name&#9;Address&#9;City&#10;John Doe&#9;123 Fake St&#9;New York..."></textarea>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Columns per Page</label>
+                <input type="number" id="cols" value="3">
+            </div>
+            <div class="control-group">
+                <label>Rows per Page</label>
+                <input type="number" id="rows" value="8">
+            </div>
+            <div class="control-group">
+                <label>Sheet Padding Top/Bot (mm)</label>
+                <input type="number" id="padY" value="12">
+            </div>
+            <div class="control-group">
+                <label>Sheet Padding Left/Right (mm)</label>
+                <input type="number" id="padX" value="5">
+            </div>
+             <div class="control-group">
+                <label>Font Size (px)</label>
+                <input type="number" id="fontSize" value="14">
+            </div>
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+            <label style="display:inline-flex; align-items:center; gap:5px;">
+                <input type="checkbox" id="showOutlines" checked> Show Grid Lines (Helpful for checking alignment, hidden on print)
+            </label>
+        </div>
+
+        <button onclick="generateLabels()">Generate Labels</button>
+    </div>
+
+    <div id="output"></div>
+
+    <script>
+        function generateLabels() {
+            const rawData = document.getElementById('inputData').value.trim();
+            const cols = parseInt(document.getElementById('cols').value);
+            const rows = parseInt(document.getElementById('rows').value);
+            const padY = document.getElementById('padY').value;
+            const padX = document.getElementById('padX').value;
+            const fontSize = document.getElementById('fontSize').value;
+            const showOutlines = document.getElementById('showOutlines').checked;
+
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML = ''; // Clear previous
+            
+            if (showOutlines) outputDiv.classList.add('show-outlines');
+            else outputDiv.classList.remove('show-outlines');
+
+            if (!rawData) return;
+
+            // Parse TSV
+            // Split by newline, then split by tab
+            const dataRows = rawData.split(/\n/).map(row => row.split(/\t/));
+            
+            const labelsPerPage = cols * rows;
+            const totalPages = Math.ceil(dataRows.length / labelsPerPage);
+
+            for (let p = 0; p < totalPages; p++) {
+                // Create a page (Sheet)
+                const sheet = document.createElement('div');
+                sheet.className = 'sheet';
+                
+                // Configure Grid
+                sheet.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+                sheet.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+                sheet.style.padding = `${padY}mm ${padX}mm`;
+                sheet.style.fontSize = `${fontSize}px`;
+
+                // Fill Page with Labels
+                const startIdx = p * labelsPerPage;
+                const endIdx = Math.min(startIdx + labelsPerPage, dataRows.length);
+
+                for (let i = startIdx; i < endIdx; i++) {
+                    const rowData = dataRows[i];
+                    const labelCell = document.createElement('div');
+                    labelCell.className = 'label-cell';
+                    
+                    // Render each column in the row as a new line
+                    rowData.forEach(text => {
+                        // clear empty quotes often found in bad csv pastes
+                        let cleanText = text.replace(/^"|"$/g, '').trim(); 
+                        if(cleanText) {
+                            const line = document.createElement('div');
+                            line.className = 'label-line';
+                            line.textContent = cleanText;
+                            labelCell.appendChild(line);
+                        }
+                    });
+
+                    sheet.appendChild(labelCell);
+                }
+
+                outputDiv.appendChild(sheet);
+            }
+        }
+    </script>
+</body>
+</html>
