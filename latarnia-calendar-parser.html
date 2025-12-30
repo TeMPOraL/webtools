@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML to TSV Parser</title>
+    <style>
+        :root {
+            --bg-color: #f4f6f8;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --border-color: #dfe1e5;
+            --accent-color: #1a73e8; /* Google Blueish */
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            color: #5f6368;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            gap: 20px;
+            min-height: 0; /* Fix for flex scroll */
+        }
+
+        .column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
+        }
+
+        label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: block;
+            font-size: 0.9rem;
+        }
+
+        textarea {
+            flex: 1;
+            width: 100%;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            font-family: "Roboto Mono", monospace;
+            font-size: 12px;
+            resize: none;
+            box-sizing: border-box;
+        }
+
+        textarea:focus {
+            outline: 2px solid var(--accent-color);
+            border-color: transparent;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: #1557b0;
+        }
+
+        button.secondary {
+            background-color: #fff;
+            color: var(--accent-color);
+            border: 1px solid var(--border-color);
+        }
+        
+        button.secondary:hover {
+            background-color: #f1f3f4;
+        }
+
+        .stats {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        /* Mobile tweaks */
+        @media (max-width: 768px) {
+            .container { flex-direction: column; }
+            body { height: auto; }
+            textarea { min-height: 300px; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>HTML Scraper (Date/Time/Title)</h1>
+
+    <div class="container">
+        <div class="column">
+            <label for="inputHtml">Paste HTML Source Here:</label>
+            <textarea id="inputHtml" placeholder='<div class="section_home_three_box__date">30.11.25</div>...'></textarea>
+            <div class="actions">
+                <button onclick="processHtml()">Extract Data</button>
+                <button class="secondary" onclick="clearAll()">Clear</button>
+            </div>
+        </div>
+
+        <div class="column">
+            <label for="outputData">TSV Output (Date / Time / Title):</label>
+            <textarea id="outputData" readonly placeholder="Result will appear here..."></textarea>
+            <div class="actions">
+                <button onclick="copyToClipboard()">Copy to Clipboard</button>
+                <span id="stats" class="stats"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function processHtml() {
+            const rawHtml = document.getElementById('inputHtml').value;
+            if (!rawHtml.trim()) return;
+
+            // Create a dummy DOM element to parse the string
+            const parserDiv = document.createElement('div');
+            parserDiv.innerHTML = rawHtml;
+
+            // Logic: Find all dates, then assume the relevant hours/title follow immediately as siblings
+            const dateNodes = parserDiv.querySelectorAll('.section_home_three_box__date');
+            
+            let tsvContent = [];
+            let count = 0;
+
+            dateNodes.forEach(dateNode => {
+                // 1. Extract Date
+                const rawDate = dateNode.textContent.trim(); // Expecting 30.11.25
+                const parsedDate = parseDate(rawDate);
+
+                // Filter logic: Must be valid and in year 2025
+                if (!parsedDate || parsedDate.year !== '2025') {
+                    return; 
+                }
+
+                // 2. Find Hours (Sibling Search)
+                // We search siblings following the date node to find the specific class
+                let hours = "";
+                let title = "";
+                
+                let sibling = dateNode.nextElementSibling;
+                // Safety limiter: look ahead max 5 siblings to find the pair, stop if we hit another date
+                let safetyCounter = 0;
+                
+                while (sibling && safetyCounter < 5) {
+                    if (sibling.classList.contains('section_home_three_box__date')) break; // Stop if we hit next entry
+                    
+                    if (sibling.classList.contains('section_home_three_box__hours')) {
+                        hours = sibling.textContent.trim();
+                    }
+                    if (sibling.classList.contains('section_home_three_box__title')) {
+                        title = sibling.textContent.trim().replace(/\s+/g, ' '); // Collapse multiple spaces
+                    }
+                    
+                    sibling = sibling.nextElementSibling;
+                    safetyCounter++;
+                }
+
+                // Construct YYYY-MM-DD
+                const formattedDate = `${parsedDate.year}-${parsedDate.month}-${parsedDate.day}`;
+
+                if (formattedDate && title) {
+                    tsvContent.push(`${formattedDate}\t${hours}\t${title}`);
+                    count++;
+                }
+            });
+
+            document.getElementById('outputData').value = tsvContent.join('\n');
+            document.getElementById('stats').innerText = `Found ${count} entries in 2025.`;
+        }
+
+        // Helper: Converts DD.MM.YY -> { year: '20YY', month: 'MM', day: 'DD' }
+        function parseDate(dateStr) {
+            // Regex for DD.MM.YY
+            const regex = /^(\d{1,2})\.(\d{1,2})\.(\d{2})$/;
+            const match = dateStr.match(regex);
+
+            if (match) {
+                const day = match[1].padStart(2, '0');
+                const month = match[2].padStart(2, '0');
+                const yearShort = match[3];
+                const yearFull = "20" + yearShort;
+                
+                return { day, month, year: yearFull };
+            }
+            return null;
+        }
+
+        function copyToClipboard() {
+            const copyText = document.getElementById("outputData");
+            copyText.select();
+            copyText.setSelectionRange(0, 99999); 
+            navigator.clipboard.writeText(copyText.value).then(() => {
+                const stats = document.getElementById('stats');
+                const originalText = stats.innerText;
+                stats.innerText = "Copied!";
+                setTimeout(() => stats.innerText = originalText, 2000);
+            });
+        }
+
+        function clearAll() {
+            document.getElementById('inputHtml').value = '';
+            document.getElementById('outputData').value = '';
+            document.getElementById('stats').innerText = '';
+        }
+    </script>
+</body>
+</html>
