@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clipboard to File</title>
+    <style>
+        :root {
+            --bg-color: #f4f4f5;
+            --card-bg: #ffffff;
+            --text-main: #18181b;
+            --text-muted: #71717a;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --danger: #ef4444;
+            --radius: 12px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #18181b;
+                --card-bg: #27272a;
+                --text-main: #f4f4f5;
+                --text-muted: #a1a1aa;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .container {
+            background-color: var(--card-bg);
+            padding: 2rem;
+            border-radius: var(--radius);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        h1 { margin-top: 0; font-size: 1.5rem; margin-bottom: 0.5rem; }
+        p { color: var(--text-muted); margin-bottom: 2rem; font-size: 0.9rem; }
+
+        .btn {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1rem;
+            border-radius: var(--radius);
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:hover { background-color: var(--primary-hover); }
+        .btn:active { transform: scale(0.98); }
+
+        .preview-area {
+            margin-top: 2rem;
+            border: 2px dashed var(--text-muted);
+            border-radius: var(--radius);
+            padding: 1rem;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .preview-area.active { display: flex; }
+
+        .preview-media {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            object-fit: contain;
+        }
+
+        .preview-text {
+            background: var(--bg-color);
+            padding: 1rem;
+            border-radius: 8px;
+            width: 100%;
+            text-align: left;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+            box-sizing: border-box;
+            font-size: 0.85rem;
+            color: var(--text-main);
+        }
+
+        .meta-info {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            background: var(--bg-color);
+            padding: 4px 12px;
+            border-radius: 100px;
+        }
+
+        .error-msg {
+            color: var(--danger);
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        /* Utility for the download button which appears later */
+        #downloadBtn {
+            background-color: #10b981; /* Green */
+            margin-top: 0;
+        }
+        #downloadBtn:hover { background-color: #059669; }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Clipboard Saver</h1>
+        <p>Paste content to inspect and save.</p>
+
+        <button id="pasteBtn" class="btn">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+            Read Clipboard
+        </button>
+
+        <div id="errorMsg" class="error-msg"></div>
+
+        <div id="previewContainer" class="preview-area">
+            <div class="meta-info" id="metaInfo">TYPE: ? | SIZE: ?</div>
+            
+            <img id="imgPreview" class="preview-media" style="display:none">
+            <div id="textPreview" class="preview-text" style="display:none"></div>
+            
+            <button id="downloadBtn" class="btn">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                Download File
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const pasteBtn = document.getElementById('pasteBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const previewContainer = document.getElementById('previewContainer');
+        const imgPreview = document.getElementById('imgPreview');
+        const textPreview = document.getElementById('textPreview');
+        const metaInfo = document.getElementById('metaInfo');
+        const errorMsg = document.getElementById('errorMsg');
+
+        let currentBlob = null;
+        let currentExtension = '';
+
+        pasteBtn.addEventListener('click', async () => {
+            // Reset UI
+            errorMsg.style.display = 'none';
+            previewContainer.classList.remove('active');
+            imgPreview.style.display = 'none';
+            textPreview.style.display = 'none';
+            
+            try {
+                // Modern Async Clipboard API
+                const clipboardItems = await navigator.clipboard.read();
+                
+                if (clipboardItems.length === 0) {
+                    throw new Error("Clipboard is empty.");
+                }
+
+                // We only handle the first item for this simple tool
+                const item = clipboardItems[0];
+                
+                // Prioritize Images, then HTML, then Plain Text
+                const types = item.types;
+                let blob = null;
+
+                if (types.some(t => t.startsWith('image/'))) {
+                    // Find the image type (usually image/png)
+                    const imgType = types.find(t => t.startsWith('image/'));
+                    blob = await item.getType(imgType);
+                    currentExtension = imgType.split('/')[1];
+                    showImage(blob);
+                } 
+                else if (types.includes('text/html')) {
+                    blob = await item.getType('text/html');
+                    currentExtension = 'html';
+                    showText(blob);
+                } 
+                else if (types.includes('text/plain')) {
+                    blob = await item.getType('text/plain');
+                    currentExtension = 'txt';
+                    showText(blob);
+                } 
+                else {
+                    // Fallback for unknown types - try to grab the first available type
+                    const firstType = types[0];
+                    blob = await item.getType(firstType);
+                    currentExtension = 'bin'; // Generic binary
+                    showGeneric(blob, firstType);
+                }
+
+                currentBlob = blob;
+                
+                // Update Metadata
+                const sizeKB = (blob.size / 1024).toFixed(2);
+                metaInfo.textContent = `TYPE: ${blob.type} | SIZE: ${sizeKB} KB`;
+                previewContainer.classList.add('active');
+
+            } catch (err) {
+                console.error(err);
+                errorMsg.textContent = `Error: ${err.message || 'Could not read clipboard. Ensure permissions are granted.'}`;
+                errorMsg.style.display = 'block';
+            }
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            if (!currentBlob) return;
+
+            const url = URL.createObjectURL(currentBlob);
+            const a = document.createElement('a');
+            
+            // Generate filename with timestamp
+            const now = new Date();
+            const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const filename = `clipboard_${timestamp}.${currentExtension}`;
+
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            
+            // Cleanup
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+        });
+
+        function showImage(blob) {
+            const url = URL.createObjectURL(blob);
+            imgPreview.src = url;
+            imgPreview.style.display = 'block';
+            
+            // Memory cleanup logic for previous images could go here
+            // For simplicity in this single-file script, we let the browser handle garbage collection mostly
+        }
+
+        async function showText(blob) {
+            const text = await blob.text();
+            textPreview.textContent = text.slice(0, 1000) + (text.length > 1000 ? '... (truncated)' : '');
+            textPreview.style.display = 'block';
+        }
+
+        function showGeneric(blob, type) {
+            textPreview.textContent = `Binary content detected (${type}). Preview unavailable.`;
+            textPreview.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
