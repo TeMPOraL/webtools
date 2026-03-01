@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer Pro V8</title>
+    <title>Photo Scan Deskewer Pro V9</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -10,7 +10,7 @@
             margin: 0; padding: 15px;
             height: 100vh; box-sizing: border-box;
             display: flex; flex-direction: column; align-items: center;
-            overflow: hidden; /* Prevent body scrolling to maximize canvas */
+            overflow: hidden;
         }
         .toolbar {
             background: #2d2d2d; padding: 10px 15px; border-radius: 8px;
@@ -33,6 +33,8 @@
         button:disabled { background: #555; cursor: not-allowed; }
         #btn-snap { background: #107c10; width: 120px; }
         #btn-snap.off { background: #c50f1f; }
+        #btn-shrink { background: #d97706; }
+        #btn-shrink:hover { background: #b45309; }
         
         .debug-container { display: flex; gap: 10px; align-items: center; }
         .debug-box { display: flex; flex-direction: column; align-items: center; }
@@ -66,6 +68,7 @@
         </div>
 
         <button id="btn-snap" disabled title="Hold Shift while dragging to temporarily invert">Snapping: ON</button>
+        <button id="btn-shrink" disabled title="Shrink inward by 5px without changing angles">Shrink 5px</button>
         <button id="btn-extract" disabled>Crop & Download</button>
 
         <div class="debug-container">
@@ -137,7 +140,6 @@
             originalMat = cv.imread(imgElement);
             displayMat = new cv.Mat();
             
-            // Dynamically maximize canvas to fit the available wrapper space
             const maxWidth = canvasWrapper.clientWidth - 4;
             const maxHeight = canvasWrapper.clientHeight - 4;
             scaleRatio = Math.min(maxWidth / originalMat.cols, maxHeight / originalMat.rows, 1);
@@ -147,7 +149,7 @@
             
             cv.resize(originalMat, displayMat, new cv.Size(canvas.width, canvas.height));
             
-            ['cv-canny', 'cv-length', 'btn-extract', 'btn-snap'].forEach(id => {
+            ['cv-canny', 'cv-length', 'btn-extract', 'btn-snap', 'btn-shrink'].forEach(id => {
                 document.getElementById(id).disabled = false;
             });
             
@@ -162,6 +164,44 @@
             globalSnapEnabled = !globalSnapEnabled;
             e.target.innerText = globalSnapEnabled ? "Snapping: ON" : "Snapping: OFF";
             e.target.className = globalSnapEnabled ? "" : "off";
+        });
+
+        document.getElementById('btn-shrink').addEventListener('click', () => {
+            if (points.length !== 4) return;
+            const d = 5; // Pixel amount to shrink per click
+            let newLines = [];
+            
+            // Calculate the 4 new lines shifted inward
+            for (let i = 0; i < 4; i++) {
+                let A = points[i];
+                let B = points[(i + 1) % 4];
+                let dx = B.x - A.x;
+                let dy = B.y - A.y;
+                let len = Math.hypot(dx, dy);
+                
+                // Normal vector pointing inward (clockwise winding)
+                let nx = -dy / len;
+                let ny = dx / len;
+                
+                newLines.push({
+                    p1: {x: A.x + d * nx, y: A.y + d * ny},
+                    p2: {x: B.x + d * nx, y: B.y + d * ny}
+                });
+            }
+            
+            // Recalculate the 4 intersections of the new lines
+            let newPoints = [];
+            for (let i = 0; i < 4; i++) {
+                let linePrev = newLines[(i + 3) % 4];
+                let lineCurr = newLines[i];
+                let inter = lineIntersection(linePrev.p1, linePrev.p2, lineCurr.p1, lineCurr.p2);
+                if (inter) newPoints.push(inter);
+            }
+            
+            if (newPoints.length === 4) {
+                points = newPoints;
+                draw();
+            }
         });
 
         ['cv-canny', 'cv-length'].forEach(id => {
@@ -180,21 +220,17 @@
             let cannyVal = parseInt(document.getElementById('cv-canny').value);
             let minLineLength = canvas.width * (parseInt(document.getElementById('cv-length').value) / 100);
 
-            // 1. Pre-process
             cv.cvtColor(displayMat, gray, cv.COLOR_RGBA2GRAY, 0);
             cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
             cv.Canny(blurred, edges, cannyVal, cannyVal * 2.5, 3);
             
-            // 2. Morphological Close to bridge tiny 1-2px gaps in the faint border lines
             let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
             cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, kernel);
             
-            // Draw Canny Debug
             let dEdges = new cv.Mat();
             cv.resize(edges, dEdges, new cv.Size(0,0), 50/edges.rows, 50/edges.rows);
             cv.imshow('debug-edges', dEdges);
 
-            // 3. Find Contours
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
@@ -202,17 +238,12 @@
             let colorLines = new cv.Mat();
             cv.cvtColor(edges, colorLines, cv.COLOR_GRAY2RGBA);
 
-            // 4. Polygon Approximation Extraction
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
-                
-                // Fast rejection: If the bounding box of the contour is smaller than our min length, skip it
                 let rect = cv.boundingRect(cnt);
                 if (Math.max(rect.width, rect.height) < minLineLength) continue;
 
                 let approx = new cv.Mat();
-                // Tolerance: 5 pixels. If a line wavers more than 5px, it breaks into a new segment.
-                // This ensures we only get fiercely straight lines.
                 cv.approxPolyDP(cnt, approx, 5, true);
 
                 let rows = approx.rows;
@@ -232,25 +263,22 @@
                 approx.delete();
             }
 
-            // Draw Rails Debug
             let dLines = new cv.Mat();
             cv.resize(colorLines, dLines, new cv.Size(0,0), 50/colorLines.rows, 50/colorLines.rows);
             cv.imshow('debug-lines', dLines);
 
             document.getElementById('status').innerText = `Found ${magneticRails.length} clean rails.`;
 
-            // Cleanup
             gray.delete(); blurred.delete(); edges.delete(); kernel.delete();
             contours.delete(); hierarchy.delete(); colorLines.delete(); dEdges.delete(); dLines.delete();
             draw();
         }
 
-        // --- MATH: Line Intersections for V7 Sliding Edge Constraints ---
         function lineIntersection(A, B, C, D) {
             let a1 = B.y - A.y, b1 = A.x - B.x, c1 = a1 * A.x + b1 * A.y;
             let a2 = D.y - C.y, b2 = C.x - D.x, c2 = a2 * C.x + b2 * C.y;
             let det = a1 * b2 - a2 * b1;
-            if (det === 0) return null; // Parallel
+            if (det === 0) return null; 
             return { x: (b2 * c1 - b1 * c2) / det, y: (a1 * c2 - a2 * c1) / det };
         }
 
@@ -262,10 +290,10 @@
                 let diff = Math.abs(rail.angle - edgeAngle) % Math.PI;
                 diff = Math.min(diff, Math.PI - diff);
                 
-                if (diff < 0.15) { // ~8.5 degrees allowance
+                if (diff < 0.15) { 
                     let d = Math.abs((rail.y2 - rail.y1)*cx - (rail.x2 - rail.x1)*cy + rail.x2*rail.y1 - rail.y2*rail.x1) / 
                             Math.hypot(rail.y2 - rail.y1, rail.x2 - rail.x1);
-                    if (d < 25) return rail; // Snap distance: 25px
+                    if (d < 25) return rail; 
                 }
             }
             return null;
@@ -284,19 +312,16 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
-            // Draw faint magnetic rails
             ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)'; ctx.lineWidth = 1.5;
             magneticRails.forEach(r => {
                 ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2); ctx.stroke();
             });
 
-            // Draw Box Fill
             ctx.fillStyle = 'rgba(0, 120, 212, 0.2)';
             ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
             for(let i=1; i<4; i++) ctx.lineTo(points[i].x, points[i].y);
             ctx.closePath(); ctx.fill();
 
-            // Draw Edges
             for (let i=0; i<4; i++) {
                 ctx.beginPath();
                 ctx.moveTo(points[i].x, points[i].y);
@@ -309,7 +334,6 @@
                 ctx.stroke();
             }
 
-            // Draw Corners
             ctx.fillStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeStyle = '#0078d4';
             points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); });
         }
@@ -386,7 +410,6 @@
 
         window.addEventListener('mouseup', () => { draggingPoint = -1; draggingEdge = -1; isSnapped = false; draw(); });
 
-        // --- EXTRACTION ---
         document.getElementById('btn-extract').addEventListener('click', () => {
             if (!originalMat) return;
             const srcCoords = [];
