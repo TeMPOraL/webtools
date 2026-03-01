@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Photo Scan Deskewer</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #1e1e1e; color: #fff;
+            margin: 0; padding: 20px;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .toolbar {
+            background: #2d2d2d; padding: 15px; border-radius: 8px;
+            margin-bottom: 20px; display: flex; gap: 15px; align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        button, input[type="file"]::file-selector-button {
+            background: #0078d4; color: white; border: none;
+            padding: 8px 16px; border-radius: 4px; cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover, input[type="file"]::file-selector-button:hover { background: #005a9e; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #canvas-container {
+            position: relative; border: 2px dashed #555; background: #000;
+            max-width: 90vw; max-height: 75vh; overflow: hidden;
+        }
+        canvas { display: block; }
+        #status { font-size: 0.9em; color: #aaa; }
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <span id="status">Loading OpenCV.js (this takes a few seconds)...</span>
+        <input type="file" id="upload" accept="image/*" disabled>
+        <button id="btn-extract" disabled>Crop & Download</button>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <canvas id="hidden-canvas" style="display:none;"></canvas>
+
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+
+    <script>
+        let cvReady = false;
+        let imgElement = new Image();
+        let originalMat, displayMat;
+        let scaleRatio = 1;
+        
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const hiddenCanvas = document.getElementById('hidden-canvas');
+        
+        // Bounding box points: Top-Left, Top-Right, Bottom-Right, Bottom-Left
+        let points = [];
+        let draggingPoint = -1;
+        let draggingEdge = -1;
+        let dragOffsetX = 0, dragOffsetY = 0;
+
+        function onOpenCvReady() {
+            cvReady = true;
+            document.getElementById('status').innerText = "Ready. Upload a scan.";
+            document.getElementById('upload').disabled = false;
+        }
+
+        document.getElementById('upload').addEventListener('change', (e) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                imgElement.onload = () => { processImageLoad(); }
+                imgElement.src = event.target.result;
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        });
+
+        function processImageLoad() {
+            if (originalMat) originalMat.delete();
+            originalMat = cv.imread(imgElement);
+            
+            // Calculate scale to fit screen
+            const maxWidth = window.innerWidth * 0.8;
+            const maxHeight = window.innerHeight * 0.7;
+            scaleRatio = Math.min(maxWidth / originalMat.cols, maxHeight / originalMat.rows, 1);
+            
+            canvas.width = originalMat.cols * scaleRatio;
+            canvas.height = originalMat.rows * scaleRatio;
+            
+            // Initial bounding box (inset by 10%)
+            const w = canvas.width, h = canvas.height;
+            const inset = Math.min(w, h) * 0.1;
+            points = [
+                { x: inset, y: inset },
+                { x: w - inset, y: inset },
+                { x: w - inset, y: h - inset },
+                { x: inset, y: h - inset }
+            ];
+
+            document.getElementById('btn-extract').disabled = false;
+            document.getElementById('status').innerText = "Drag corners or edges to align.";
+            draw();
+        }
+
+        function draw() {
+            if (!originalMat) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
+
+            // Draw Polygon Area
+            ctx.fillStyle = 'rgba(0, 120, 212, 0.2)';
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for(let i=1; i<4; i++) ctx.lineTo(points[i].x, points[i].y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Draw Edges
+            ctx.strokeStyle = '#0078d4';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw Corners
+            ctx.fillStyle = '#fff';
+            points.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.stroke();
+            });
+        }
+
+        // --- INTERACTION LOGIC ---
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        }
+
+        // Math helper: distance from point to line segment
+        function distToSegment(p, v, w) {
+            const l2 = (v.x - w.x)**2 + (v.y - w.y)**2;
+            if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+            let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            const pos = getMousePos(e);
+            
+            // Check corners first
+            for (let i = 0; i < 4; i++) {
+                if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 10) {
+                    draggingPoint = i;
+                    return;
+                }
+            }
+            
+            // Check edges
+            for (let i = 0; i < 4; i++) {
+                const p1 = points[i];
+                const p2 = points[(i + 1) % 4];
+                if (distToSegment(pos, p1, p2) < 10) {
+                    draggingEdge = i;
+                    dragOffsetX = pos.x;
+                    dragOffsetY = pos.y;
+                    return;
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const pos = getMousePos(e);
+            
+            if (draggingPoint !== -1) {
+                points[draggingPoint].x = pos.x;
+                points[draggingPoint].y = pos.y;
+                draw();
+            } else if (draggingEdge !== -1) {
+                const dx = pos.x - dragOffsetX;
+                const dy = pos.y - dragOffsetY;
+                
+                const p1 = draggingEdge;
+                const p2 = (draggingEdge + 1) % 4;
+                
+                points[p1].x += dx; points[p1].y += dy;
+                points[p2].x += dx; points[p2].y += dy;
+                
+                dragOffsetX = pos.x; dragOffsetY = pos.y;
+                draw();
+            } else {
+                // Change cursor based on hover
+                let cursor = 'default';
+                for (let i = 0; i < 4; i++) {
+                    if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 10) cursor = 'crosshair';
+                    else if (distToSegment(pos, points[i], points[(i+1)%4]) < 10) cursor = 'move';
+                }
+                canvas.style.cursor = cursor;
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            draggingPoint = -1;
+            draggingEdge = -1;
+        });
+
+        // --- OPENCV EXTRACTION LOGIC ---
+        document.getElementById('btn-extract').addEventListener('click', () => {
+            if (!originalMat) return;
+            
+            // Scale points back to original image resolution
+            const srcCoords = [];
+            points.forEach(p => {
+                srcCoords.push(p.x / scaleRatio, p.y / scaleRatio);
+            });
+
+            // Calculate destination rectangle size (max width/height of the quad)
+            const w1 = Math.hypot(srcCoords[4] - srcCoords[6], srcCoords[5] - srcCoords[7]); // bottom
+            const w2 = Math.hypot(srcCoords[0] - srcCoords[2], srcCoords[1] - srcCoords[3]); // top
+            const h1 = Math.hypot(srcCoords[2] - srcCoords[4], srcCoords[3] - srcCoords[5]); // right
+            const h2 = Math.hypot(srcCoords[0] - srcCoords[6], srcCoords[1] - srcCoords[7]); // left
+            
+            const maxWidth = Math.max(w1, w2);
+            const maxHeight = Math.max(h1, h2);
+
+            const dstCoords = [
+                0, 0,
+                maxWidth, 0,
+                maxWidth, maxHeight,
+                0, maxHeight
+            ];
+
+            // Create Mats for the transform
+            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, srcCoords);
+            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, dstCoords);
+            let M = cv.getPerspectiveTransform(srcTri, dstTri);
+            let warpedDst = new cv.Mat();
+            let dsize = new cv.Size(maxWidth, maxHeight);
+
+            // Apply warp
+            cv.warpPerspective(originalMat, warpedDst, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
+            // Draw to hidden canvas to download
+            cv.imshow('hidden-canvas', warpedDst);
+            const dataURL = hiddenCanvas.toDataURL('image/jpeg', 0.95);
+            
+            // Trigger Download
+            const a = document.createElement('a');
+            a.href = dataURL;
+            a.download = 'fixed_scan.jpg';
+            a.click();
+
+            // Cleanup
+            srcTri.delete(); dstTri.delete(); M.delete(); warpedDst.delete();
+        });
+    </script>
+</body>
+</html>
