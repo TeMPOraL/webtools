@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer Pro V4</title>
+    <title>Photo Scan Deskewer Pro V5</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -19,7 +19,7 @@
             display: flex; gap: 15px; align-items: center;
             border-left: 2px solid #444; border-right: 2px solid #444; padding: 0 15px;
         }
-        .slider-group { display: flex; flex-direction: column; font-size: 0.8em; color: #bbb; min-width: 120px;}
+        .slider-group { display: flex; flex-direction: column; font-size: 0.8em; color: #bbb; min-width: 130px;}
         .slider-group span { display: flex; justify-content: space-between; margin-bottom: 4px; }
         button, input[type="file"]::file-selector-button {
             background: #0078d4; color: white; border: none;
@@ -30,7 +30,7 @@
         
         #canvas-container {
             position: relative; border: 2px dashed #555; background: #000;
-            max-width: 90vw; max-height: 60vh; overflow: hidden;
+            max-width: 90vw; max-height: 55vh; overflow: hidden;
         }
         canvas { display: block; }
         
@@ -53,20 +53,16 @@
         
         <div class="controls">
             <div class="slider-group">
-                <span><label>Blur (Kill Noise)</label><output id="out-blur">15</output></span>
-                <input type="range" id="cv-blur" min="1" max="51" step="2" value="15" disabled>
+                <span><label>Texture Detail</label><output id="out-thresh">20</output></span>
+                <input type="range" id="cv-thresh" min="5" max="100" value="20" disabled title="Lower picks up more subtle details">
             </div>
             <div class="slider-group">
-                <span><label>Edge Sens (Min)</label><output id="out-t1">30</output></span>
-                <input type="range" id="cv-t1" min="10" max="150" value="30" disabled>
+                <span><label>Blob Fusion</label><output id="out-fuse">25</output></span>
+                <input type="range" id="cv-fuse" min="5" max="61" step="2" value="25" disabled title="Smushes the details together">
             </div>
             <div class="slider-group">
-                <span><label>Edge Sens (Max)</label><output id="out-t2">100</output></span>
-                <input type="range" id="cv-t2" min="50" max="250" value="100" disabled>
-            </div>
-            <div class="slider-group">
-                <span><label>Edge Thickness</label><output id="out-dilate">3</output></span>
-                <input type="range" id="cv-dilate" min="0" max="15" value="3" disabled>
+                <span><label>Border Padding</label><output id="out-pad">15</output></span>
+                <input type="range" id="cv-pad" min="-10" max="60" value="15" disabled title="Expands the box to catch the white border">
             </div>
         </div>
 
@@ -79,12 +75,12 @@
 
     <div id="debug-container">
         <div class="debug-box">
-            <p>1. Blurred Grayscale</p>
-            <canvas id="debug-gray" class="debug-canvas"></canvas>
+            <p>1. Texture Map (Noise)</p>
+            <canvas id="debug-texture" class="debug-canvas"></canvas>
         </div>
         <div class="debug-box">
-            <p>2. Canny + Dilate (Bot Vision)</p>
-            <canvas id="debug-edges" class="debug-canvas"></canvas>
+            <p>2. Fused Content Blob</p>
+            <canvas id="debug-blob" class="debug-canvas"></canvas>
         </div>
     </div>
 
@@ -143,7 +139,7 @@
             displayMat = new cv.Mat();
             
             const maxWidth = window.innerWidth * 0.8;
-            const maxHeight = window.innerHeight * 0.60;
+            const maxHeight = window.innerHeight * 0.55;
             scaleRatio = Math.min(maxWidth / originalMat.cols, maxHeight / originalMat.rows, 1);
             
             canvas.width = originalMat.cols * scaleRatio;
@@ -151,15 +147,14 @@
             
             cv.resize(originalMat, displayMat, new cv.Size(canvas.width, canvas.height));
             
-            ['cv-blur', 'cv-t1', 'cv-t2', 'cv-dilate', 'btn-extract'].forEach(id => {
+            ['cv-thresh', 'cv-fuse', 'cv-pad', 'btn-extract'].forEach(id => {
                 document.getElementById(id).disabled = false;
             });
             
             autoDetectCorners();
         }
 
-        // Hook up sliders to update logic and outputs
-        ['cv-blur', 'cv-t1', 'cv-t2', 'cv-dilate'].forEach(id => {
+        ['cv-thresh', 'cv-fuse', 'cv-pad'].forEach(id => {
             document.getElementById(id).addEventListener('input', (e) => {
                 document.getElementById('out-' + id.split('-')[1]).innerText = e.target.value;
                 autoDetectCorners();
@@ -170,71 +165,84 @@
             if (!displayMat) return;
             
             let gray = new cv.Mat();
-            let blur = new cv.Mat();
-            let edges = new cv.Mat();
+            let grad = new cv.Mat();
+            let thresh = new cv.Mat();
+            let morphed = new cv.Mat();
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
 
-            let blurVal = parseInt(document.getElementById('cv-blur').value);
-            let t1 = parseInt(document.getElementById('cv-t1').value);
-            let t2 = parseInt(document.getElementById('cv-t2').value);
-            let dilateVal = parseInt(document.getElementById('cv-dilate').value);
+            let threshVal = parseInt(document.getElementById('cv-thresh').value);
+            let fuseVal = parseInt(document.getElementById('cv-fuse').value);
+            let padVal = parseInt(document.getElementById('cv-pad').value);
 
             // 1. Grayscale
             cv.cvtColor(displayMat, gray, cv.COLOR_RGBA2GRAY, 0);
             
-            // 2. Heavy Blur to kill internal texture
-            cv.GaussianBlur(gray, blur, new cv.Size(blurVal, blurVal), 0, 0, cv.BORDER_DEFAULT);
-            cv.imshow('debug-gray', blur); // Show blurred version in debug
+            // 2. Morphological Gradient (Finds all texture/changes, ignores flat colors)
+            let kernel3x3 = cv.Mat.ones(3, 3, cv.CV_8U);
+            cv.morphologyEx(gray, grad, cv.MORPH_GRADIENT, kernel3x3);
+            
+            // 3. Threshold to binary map
+            cv.threshold(grad, thresh, threshVal, 255, cv.THRESH_BINARY);
+            cv.imshow('debug-texture', thresh);
 
-            // 3. Canny Edge Detection
-            cv.Canny(blur, edges, t1, t2);
+            // 4. Heavy dilation to fuse all the texture together into one big block
+            let fuseKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(fuseVal, fuseVal));
+            cv.dilate(thresh, morphed, fuseKernel, new cv.Point(-1,-1), 1);
+            cv.imshow('debug-blob', morphed);
 
-            // 4. Dilate to thicken edges and close gaps
-            if (dilateVal > 0) {
-                let M = cv.Mat.ones(dilateVal, dilateVal, cv.CV_8U);
-                cv.dilate(edges, edges, M, new cv.Point(-1, -1), 1, cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
-                M.delete();
-            }
-
-            cv.imshow('debug-edges', edges); // Show dilated edges
-
-            // 5. Find Contours
-            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            // 5. Find the massive blob contour
+            cv.findContours(morphed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let maxArea = 0;
-            let bestPoints = null;
+            let bestRect = null;
 
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                if (area > (canvas.width * canvas.height * 0.05)) { 
-                    let perimeter = cv.arcLength(cnt, true);
-                    let approx = new cv.Mat();
-                    cv.approxPolyDP(cnt, approx, 0.04 * perimeter, true); 
-                    
-                    if (approx.rows === 4 && area > maxArea) {
-                        maxArea = area;
-                        bestPoints = [];
-                        for (let j = 0; j < 4; j++) {
-                            bestPoints.push({ x: approx.data32S[j*2], y: approx.data32S[j*2+1] });
-                        }
-                    }
-                    approx.delete();
+                if (area > maxArea && area > (canvas.width * canvas.height * 0.05)) {
+                    maxArea = area;
+                    // MAGIC: Get the minimum bounding rotated rectangle around the blob
+                    bestRect = cv.minAreaRect(cnt);
                 }
             }
 
             // Cleanup
-            gray.delete(); blur.delete(); edges.delete(); contours.delete(); hierarchy.delete();
+            gray.delete(); grad.delete(); thresh.delete(); morphed.delete(); 
+            contours.delete(); hierarchy.delete(); kernel3x3.delete(); fuseKernel.delete();
 
-            if (bestPoints) {
-                document.getElementById('status').innerText = "Auto-detected! Adjust corners if needed.";
-                bestPoints.sort((a, b) => a.y - b.y); 
-                let top = bestPoints.slice(0, 2).sort((a, b) => a.x - b.x); 
-                let bottom = bestPoints.slice(2, 4).sort((a, b) => b.x - a.x); 
+            if (bestRect) {
+                document.getElementById('status').innerText = "Found content block! Adjust padding if needed.";
+                
+                // Convert RotatedRect to 4 corners
+                let vertices = cv.RotatedRect.points(bestRect);
+                let cx = bestRect.center.x;
+                let cy = bestRect.center.y;
+                
+                let rawPoints = [];
+                for (let i = 0; i < 4; i++) {
+                    let px = vertices[i].x;
+                    let py = vertices[i].y;
+                    
+                    // Apply Border Padding (push points away from center)
+                    let dx = px - cx;
+                    let dy = py - cy;
+                    let dist = Math.hypot(dx, dy);
+                    if (dist > 0) {
+                        px += (dx / dist) * padVal;
+                        py += (dy / dist) * padVal;
+                    }
+                    rawPoints.push({x: px, y: py});
+                }
+                
+                // Sort points mathematically for UI dragging (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
+                rawPoints.sort((a, b) => a.y - b.y); 
+                let top = rawPoints.slice(0, 2).sort((a, b) => a.x - b.x); 
+                let bottom = rawPoints.slice(2, 4).sort((a, b) => b.x - a.x); 
                 points = [top[0], top[1], bottom[0], bottom[1]];
+                
             } else {
-                document.getElementById('status').innerText = "Auto-detect failed. Adjust sliders or drag manually.";
+                document.getElementById('status').innerText = "Detection failed. Drag manually.";
                 const w = canvas.width, h = canvas.height;
                 const inset = Math.min(w, h) * 0.1;
                 points = [{x: inset, y: inset}, {x: w-inset, y: inset}, {x: w-inset, y: h-inset}, {x: inset, y: h-inset}];
@@ -249,20 +257,14 @@
             ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
             ctx.fillStyle = 'rgba(0, 120, 212, 0.2)';
-            ctx.beginPath();
-            ctx.moveTo(points[0].x, points[0].y);
+            ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
             for(let i=1; i<4; i++) ctx.lineTo(points[i].x, points[i].y);
-            ctx.closePath();
-            ctx.fill();
+            ctx.closePath(); ctx.fill();
 
-            ctx.strokeStyle = '#0078d4';
-            ctx.lineWidth = 2;
-            ctx.stroke();
+            ctx.strokeStyle = '#0078d4'; ctx.lineWidth = 2; ctx.stroke();
 
             ctx.fillStyle = '#fff';
-            points.forEach(p => {
-                ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-            });
+            points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); });
         }
 
         function distToSegment(p, v, w) {
@@ -289,10 +291,8 @@
         canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-            
-            if (draggingPoint !== -1) {
-                points[draggingPoint] = pos; draw();
-            } else if (draggingEdge !== -1) {
+            if (draggingPoint !== -1) { points[draggingPoint] = pos; draw(); } 
+            else if (draggingEdge !== -1) {
                 const dx = pos.x - dragOffsetX; const dy = pos.y - dragOffsetY;
                 points[draggingEdge].x += dx; points[draggingEdge].y += dy;
                 points[(draggingEdge + 1) % 4].x += dx; points[(draggingEdge + 1) % 4].y += dy;
@@ -304,7 +304,6 @@
 
         document.getElementById('btn-extract').addEventListener('click', () => {
             if (!originalMat) return;
-            
             const srcCoords = [];
             points.forEach(p => { srcCoords.push(p.x / scaleRatio, p.y / scaleRatio); });
 
@@ -312,9 +311,7 @@
             const w2 = Math.hypot(srcCoords[0] - srcCoords[2], srcCoords[1] - srcCoords[3]); 
             const h1 = Math.hypot(srcCoords[2] - srcCoords[4], srcCoords[3] - srcCoords[5]); 
             const h2 = Math.hypot(srcCoords[0] - srcCoords[6], srcCoords[1] - srcCoords[7]); 
-            
-            const maxWidth = Math.max(w1, w2);
-            const maxHeight = Math.max(h1, h2);
+            const maxWidth = Math.max(w1, w2); const maxHeight = Math.max(h1, h2);
 
             const dstCoords = [0, 0, maxWidth, 0, maxWidth, maxHeight, 0, maxHeight];
 
@@ -335,7 +332,6 @@
             
             const a = document.createElement('a');
             a.href = dataURL; a.download = `${originalFileName}-fixed.jpg`; a.click();
-
             srcTri.delete(); dstTri.delete(); M.delete(); warpedDst.delete();
         });
     </script>
