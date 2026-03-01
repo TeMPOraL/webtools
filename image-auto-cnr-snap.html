@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer Pro V7</title>
+    <title>Photo Scan Deskewer Pro V8</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -10,6 +10,7 @@
             margin: 0; padding: 15px;
             height: 100vh; box-sizing: border-box;
             display: flex; flex-direction: column; align-items: center;
+            overflow: hidden; /* Prevent body scrolling to maximize canvas */
         }
         .toolbar {
             background: #2d2d2d; padding: 10px 15px; border-radius: 8px;
@@ -36,13 +37,13 @@
         .debug-container { display: flex; gap: 10px; align-items: center; }
         .debug-box { display: flex; flex-direction: column; align-items: center; }
         .debug-box p { margin: 0 0 2px 0; font-size: 0.7em; color: #aaa; }
-        .debug-canvas { height: 60px; border: 1px solid #444; background: #000; cursor: crosshair;}
+        .debug-canvas { height: 50px; border: 1px solid #444; background: #000; cursor: crosshair;}
         
         #canvas-wrapper {
             flex-grow: 1; width: 100%; display: flex; justify-content: center; align-items: center;
             border: 2px dashed #555; background: #000; overflow: hidden; position: relative;
         }
-        canvas { display: block; max-width: 100%; max-height: 100%; }
+        canvas { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
         
         #status { font-size: 0.9em; color: #aaa; min-width: 150px; }
     </style>
@@ -55,21 +56,21 @@
         
         <div class="controls">
             <div class="slider-group">
-                <span><label>Rail Sensitivity</label><output id="out-canny">50</output></span>
-                <input type="range" id="cv-canny" min="10" max="150" value="50" disabled>
+                <span><label>Rail Sensitivity</label><output id="out-canny">40</output></span>
+                <input type="range" id="cv-canny" min="10" max="150" value="40" disabled>
             </div>
             <div class="slider-group">
-                <span><label>Min Line Length (%)</label><output id="out-length">25</output></span>
-                <input type="range" id="cv-length" min="5" max="60" value="25" disabled>
+                <span><label>Min Line Length (%)</label><output id="out-length">20</output></span>
+                <input type="range" id="cv-length" min="5" max="60" value="20" disabled>
             </div>
         </div>
 
-        <button id="btn-snap" disabled>Snapping: ON</button>
+        <button id="btn-snap" disabled title="Hold Shift while dragging to temporarily invert">Snapping: ON</button>
         <button id="btn-extract" disabled>Crop & Download</button>
 
         <div class="debug-container">
-            <div class="debug-box"><p>Canny Edges</p><canvas id="debug-edges" class="debug-canvas"></canvas></div>
-            <div class="debug-box"><p>Magnetic Rails</p><canvas id="debug-lines" class="debug-canvas"></canvas></div>
+            <div class="debug-box"><p>Canny</p><canvas id="debug-edges" class="debug-canvas"></canvas></div>
+            <div class="debug-box"><p>Rails</p><canvas id="debug-lines" class="debug-canvas"></canvas></div>
         </div>
     </div>
 
@@ -136,7 +137,7 @@
             originalMat = cv.imread(imgElement);
             displayMat = new cv.Mat();
             
-            // Maximize canvas to fit the available wrapper space
+            // Dynamically maximize canvas to fit the available wrapper space
             const maxWidth = canvasWrapper.clientWidth - 4;
             const maxHeight = canvasWrapper.clientHeight - 4;
             scaleRatio = Math.min(maxWidth / originalMat.cols, maxHeight / originalMat.rows, 1);
@@ -173,44 +174,78 @@
         function analyzeRails() {
             if (!displayMat) return;
             
-            let gray = new cv.Mat(), edges = new cv.Mat(), lines = new cv.Mat();
+            let gray = new cv.Mat(), blurred = new cv.Mat(), edges = new cv.Mat();
             magneticRails = [];
 
             let cannyVal = parseInt(document.getElementById('cv-canny').value);
             let minLineLength = canvas.width * (parseInt(document.getElementById('cv-length').value) / 100);
 
+            // 1. Pre-process
             cv.cvtColor(displayMat, gray, cv.COLOR_RGBA2GRAY, 0);
-            cv.Canny(gray, edges, cannyVal, cannyVal * 2.5, 3);
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            cv.Canny(blurred, edges, cannyVal, cannyVal * 2.5, 3);
             
-            // Draw to debug with scaling
+            // 2. Morphological Close to bridge tiny 1-2px gaps in the faint border lines
+            let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+            cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, kernel);
+            
+            // Draw Canny Debug
             let dEdges = new cv.Mat();
-            cv.resize(edges, dEdges, new cv.Size(0,0), 60/edges.rows, 60/edges.rows);
+            cv.resize(edges, dEdges, new cv.Size(0,0), 50/edges.rows, 50/edges.rows);
             cv.imshow('debug-edges', dEdges);
 
-            cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 50, minLineLength, 20);
+            // 3. Find Contours
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
             let colorLines = new cv.Mat();
             cv.cvtColor(edges, colorLines, cv.COLOR_GRAY2RGBA);
 
-            for (let i = 0; i < lines.rows; ++i) {
-                let x1 = lines.data32S[i*4], y1 = lines.data32S[i*4+1];
-                let x2 = lines.data32S[i*4+2], y2 = lines.data32S[i*4+3];
-                let angle = Math.atan2(y2 - y1, x2 - x1);
-                magneticRails.push({x1, y1, x2, y2, angle});
-                cv.line(colorLines, new cv.Point(x1,y1), new cv.Point(x2,y2), new cv.Scalar(255,0,0,255), 2);
+            // 4. Polygon Approximation Extraction
+            for (let i = 0; i < contours.size(); ++i) {
+                let cnt = contours.get(i);
+                
+                // Fast rejection: If the bounding box of the contour is smaller than our min length, skip it
+                let rect = cv.boundingRect(cnt);
+                if (Math.max(rect.width, rect.height) < minLineLength) continue;
+
+                let approx = new cv.Mat();
+                // Tolerance: 5 pixels. If a line wavers more than 5px, it breaks into a new segment.
+                // This ensures we only get fiercely straight lines.
+                cv.approxPolyDP(cnt, approx, 5, true);
+
+                let rows = approx.rows;
+                for (let j = 0; j < rows; ++j) {
+                    let p1x = approx.data32S[j * 2];
+                    let p1y = approx.data32S[j * 2 + 1];
+                    let p2x = approx.data32S[((j + 1) % rows) * 2];
+                    let p2y = approx.data32S[((j + 1) % rows) * 2 + 1];
+
+                    let length = Math.hypot(p2x - p1x, p2y - p1y);
+                    if (length >= minLineLength) {
+                        let angle = Math.atan2(p2y - p1y, p2x - p1x);
+                        magneticRails.push({x1: p1x, y1: p1y, x2: p2x, y2: p2y, angle: angle});
+                        cv.line(colorLines, new cv.Point(p1x, p1y), new cv.Point(p2x, p2y), new cv.Scalar(255, 0, 0, 255), 2);
+                    }
+                }
+                approx.delete();
             }
 
+            // Draw Rails Debug
             let dLines = new cv.Mat();
-            cv.resize(colorLines, dLines, new cv.Size(0,0), 60/colorLines.rows, 60/colorLines.rows);
+            cv.resize(colorLines, dLines, new cv.Size(0,0), 50/colorLines.rows, 50/colorLines.rows);
             cv.imshow('debug-lines', dLines);
 
-            document.getElementById('status').innerText = `Found ${magneticRails.length} rails. Hold Shift to invert snap.`;
+            document.getElementById('status').innerText = `Found ${magneticRails.length} clean rails.`;
 
-            gray.delete(); edges.delete(); lines.delete(); colorLines.delete(); dEdges.delete(); dLines.delete();
+            // Cleanup
+            gray.delete(); blurred.delete(); edges.delete(); kernel.delete();
+            contours.delete(); hierarchy.delete(); colorLines.delete(); dEdges.delete(); dLines.delete();
             draw();
         }
 
-        // --- MATH: Line Intersections for Constraints ---
+        // --- MATH: Line Intersections for V7 Sliding Edge Constraints ---
         function lineIntersection(A, B, C, D) {
             let a1 = B.y - A.y, b1 = A.x - B.x, c1 = a1 * A.x + b1 * A.y;
             let a2 = D.y - C.y, b2 = C.x - D.x, c2 = a2 * C.x + b2 * C.y;
@@ -227,10 +262,10 @@
                 let diff = Math.abs(rail.angle - edgeAngle) % Math.PI;
                 diff = Math.min(diff, Math.PI - diff);
                 
-                if (diff < 0.15) { // ~8.5 degrees
+                if (diff < 0.15) { // ~8.5 degrees allowance
                     let d = Math.abs((rail.y2 - rail.y1)*cx - (rail.x2 - rail.x1)*cy + rail.x2*rail.y1 - rail.y2*rail.x1) / 
                             Math.hypot(rail.y2 - rail.y1, rail.x2 - rail.x1);
-                    if (d < 25) return rail; // Return the entire rail mathematically
+                    if (d < 25) return rail; // Snap distance: 25px
                 }
             }
             return null;
@@ -249,16 +284,19 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
-            ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)'; ctx.lineWidth = 1;
+            // Draw faint magnetic rails
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)'; ctx.lineWidth = 1.5;
             magneticRails.forEach(r => {
                 ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2); ctx.stroke();
             });
 
+            // Draw Box Fill
             ctx.fillStyle = 'rgba(0, 120, 212, 0.2)';
             ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
             for(let i=1; i<4; i++) ctx.lineTo(points[i].x, points[i].y);
             ctx.closePath(); ctx.fill();
 
+            // Draw Edges
             for (let i=0; i<4; i++) {
                 ctx.beginPath();
                 ctx.moveTo(points[i].x, points[i].y);
@@ -271,6 +309,7 @@
                 ctx.stroke();
             }
 
+            // Draw Corners
             ctx.fillStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeStyle = '#0078d4';
             points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); });
         }
@@ -289,7 +328,6 @@
                 if (distToSegment(pos, points[i], points[(i + 1) % 4]) < 10) {
                     draggingEdge = i; 
                     dragOffsetX = pos.x; dragOffsetY = pos.y; 
-                    // Deep copy current points to act as static geometry rails for intersections
                     dragStartPoints = JSON.parse(JSON.stringify(points));
                     return;
                 }
@@ -301,7 +339,6 @@
             const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
             
             if (draggingPoint !== -1) { 
-                // Corner dragging is completely free, no snapping, no angle constraints
                 points[draggingPoint] = pos; 
                 isSnapped = false;
                 draw(); 
@@ -310,17 +347,14 @@
                 let dx = pos.x - dragOffsetX; 
                 let dy = pos.y - dragOffsetY;
                 
-                // Get the invariant adjacent lines
                 let pPrev = dragStartPoints[(i + 3) % 4];
                 let p1 = dragStartPoints[i];
                 let p2 = dragStartPoints[(i + 1) % 4];
                 let pNext = dragStartPoints[(i + 2) % 4];
 
-                // Our proposed translated line
                 let targetLineP1 = {x: p1.x + dx, y: p1.y + dy};
                 let targetLineP2 = {x: p2.x + dx, y: p2.y + dy};
                 
-                // Shift key temporarily inverts the snapping behavior
                 let effectiveSnap = globalSnapEnabled !== e.shiftKey;
                 isSnapped = false;
 
@@ -333,13 +367,11 @@
                     }
                 }
 
-                // Math Magic: Slide corners along the infinite lines of the adjacent edges
                 let newP1 = lineIntersection(pPrev, p1, targetLineP1, targetLineP2);
                 let newP2 = lineIntersection(p2, pNext, targetLineP1, targetLineP2);
 
                 if (newP1 && newP2) {
-                    points[i] = newP1;
-                    points[(i + 1) % 4] = newP2;
+                    points[i] = newP1; points[(i + 1) % 4] = newP2;
                 }
                 draw();
             } else {
@@ -354,6 +386,7 @@
 
         window.addEventListener('mouseup', () => { draggingPoint = -1; draggingEdge = -1; isSnapped = false; draw(); });
 
+        // --- EXTRACTION ---
         document.getElementById('btn-extract').addEventListener('click', () => {
             if (!originalMat) return;
             const srcCoords = [];
