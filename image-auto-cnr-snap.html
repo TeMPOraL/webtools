@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer Pro V10</title>
+    <title>Photo Scan Deskewer Pro V12</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -30,7 +30,12 @@
             padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;
         }
         button:hover, input[type="file"]::file-selector-button:hover { background: #005a9e; }
-        button:disabled { background: #555; cursor: not-allowed; }
+        button:disabled { background: #555; cursor: not-allowed; opacity: 0.7; }
+        
+        .transform-group { display: flex; gap: 5px; }
+        .transform-group button { background: #5c2d91; padding: 8px 12px; font-size: 1.1em; }
+        .transform-group button:hover { background: #4b2377; }
+        
         #btn-snap { background: #107c10; width: 120px; }
         #btn-snap.off { background: #c50f1f; }
         #btn-shrink { background: #d97706; }
@@ -62,7 +67,7 @@
         }
         canvas { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
         
-        #status { font-size: 0.9em; color: #aaa; min-width: 150px; }
+        #status { font-size: 0.9em; color: #aaa; min-width: 140px; }
     </style>
 </head>
 <body>
@@ -70,6 +75,13 @@
     <div class="toolbar">
         <span id="status">Wczytywanie OpenCV.js...</span>
         <input type="file" id="upload" accept="image/*" disabled>
+        
+        <div class="transform-group">
+            <button id="btn-rot-l" disabled title="Obróć w lewo (90°)">↶</button>
+            <button id="btn-rot-r" disabled title="Obróć w prawo (90°)">↷</button>
+            <button id="btn-flip-h" disabled title="Odbij w poziomie">↔</button>
+            <button id="btn-flip-v" disabled title="Odbij w pionie">↕</button>
+        </div>
         
         <div class="controls">
             <div class="slider-group">
@@ -97,10 +109,11 @@
             <h2>Jak korzystać z narzędzia</h2>
             <ol>
                 <li><strong>Wgraj skan:</strong> Użyj przycisku po lewej stronie, aby załadować zeskanowane zdjęcie.</li>
+                <li><strong>Obróć i odbij (Opcjonalnie):</strong> Jeśli skan jest do góry nogami lub w złej orientacji, użyj fioletowych przycisków ze strzałkami (↶ ↷ ↔ ↕), aby go odpowiednio ustawić. Operacje te są w 100% bezstratne.</li>
                 <li><strong>Ustaw zgrubne ramki (Snapping):</strong> Złap za krawędź niebieskiego prostokąta i przeciągnij ją w stronę brzegu zdjęcia. Krawędź automatycznie "przyklei się" do wykrytych prostych linii.</li>
                 <li><strong>Dostosuj wykrywanie (Opcjonalnie):</strong> Jeśli linie są słabo wykrywane, przesuń suwaki "Czułość krawędzi" lub "Min. dł. linii", obserwując podgląd w prawym górnym rogu.</li>
                 <li><strong>Precyzyjne poprawki:</strong> Kliknij przycisk "Snapping: ON", aby wyłączyć przyciąganie (lub przytrzymaj klawisz <code>Shift</code>). Teraz możesz płynnie przesuwać krawędzie i rogi, aby idealnie dopasować je do krzywizn zdjęcia.</li>
-                <li><strong>Odetnij margines:</strong> Kliknij przycisk "Shrink 1px" kilka razy, aby błyskawicznie ścisnąć ramkę i pozbyć się niechcianych, milimetrowych marginesów ze skanera – bez psucia ustawionych kątów!</li>
+                <li><strong>Odetnij margines:</strong> Kliknij przycisk "Shrink 1px" kilka razy, aby błyskawicznie ścisnąć ramkę i pozbyć się niechcianych, milimetrowych marginesów ze skanera – bez psucia ustawionych kątów.</li>
                 <li><strong>Zapisz:</strong> Kliknij "Crop & Download", aby pobrać idealnie wykadrowane i wyprostowane zdjęcie.</li>
             </ol>
         </div>
@@ -118,7 +131,7 @@
     <script>
         let cvReady = false;
         let imgElement = new Image();
-        let originalMat, displayMat;
+        let originalMat = null, displayMat = null;
         let scaleRatio = 1;
         
         let originalFileName = "scan";
@@ -157,7 +170,13 @@
                 const dataURL = event.target.result;
                 savedExifData = null;
                 if (dataURL.startsWith("data:image/jpeg")) {
-                    try { savedExifData = piexif.dump(piexif.load(dataURL)); } catch(e){}
+                    try { 
+                        let exifObj = piexif.load(dataURL); 
+                        if (exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Orientation]) {
+                            exifObj["0th"][piexif.ImageIFD.Orientation] = 1;
+                        }
+                        savedExifData = piexif.dump(exifObj); 
+                    } catch(e) { console.warn("EXIF processing failed."); }
                 }
                 imgElement.onload = () => { processImageLoad(); }
                 imgElement.src = dataURL;
@@ -169,8 +188,18 @@
             instructions.style.display = 'none';
             canvasWrapper.style.display = 'flex';
 
-            if (originalMat) { originalMat.delete(); displayMat.delete(); }
+            if (originalMat) { originalMat.delete(); }
             originalMat = cv.imread(imgElement);
+            
+            setupWorkspaceFromOriginalMat();
+            
+            const btnIds = ['cv-canny', 'cv-length', 'btn-extract', 'btn-snap', 'btn-shrink', 
+                            'btn-rot-l', 'btn-rot-r', 'btn-flip-h', 'btn-flip-v'];
+            btnIds.forEach(id => document.getElementById(id).disabled = false);
+        }
+
+        function setupWorkspaceFromOriginalMat() {
+            if (displayMat) { displayMat.delete(); }
             displayMat = new cv.Mat();
             
             const maxWidth = canvasWrapper.clientWidth - 4;
@@ -182,16 +211,30 @@
             
             cv.resize(originalMat, displayMat, new cv.Size(canvas.width, canvas.height));
             
-            ['cv-canny', 'cv-length', 'btn-extract', 'btn-snap', 'btn-shrink'].forEach(id => {
-                document.getElementById(id).disabled = false;
-            });
-            
             const w = canvas.width, h = canvas.height;
             const ix = w * 0.15, iy = h * 0.15;
             points = [{x: ix, y: iy}, {x: w-ix, y: iy}, {x: w-ix, y: h-iy}, {x: ix, y: h-iy}];
 
             analyzeRails();
         }
+
+        function transformOriginalImage(operation, code) {
+            if (!originalMat) return;
+            let transformedMat = new cv.Mat();
+            if (operation === 'rotate') {
+                cv.rotate(originalMat, transformedMat, code);
+            } else if (operation === 'flip') {
+                cv.flip(originalMat, transformedMat, code);
+            }
+            originalMat.delete();
+            originalMat = transformedMat;
+            setupWorkspaceFromOriginalMat();
+        }
+
+        document.getElementById('btn-rot-l').addEventListener('click', () => transformOriginalImage('rotate', cv.ROTATE_90_COUNTERCLOCKWISE));
+        document.getElementById('btn-rot-r').addEventListener('click', () => transformOriginalImage('rotate', cv.ROTATE_90_CLOCKWISE));
+        document.getElementById('btn-flip-h').addEventListener('click', () => transformOriginalImage('flip', 1));
+        document.getElementById('btn-flip-v').addEventListener('click', () => transformOriginalImage('flip', 0));
 
         document.getElementById('btn-snap').addEventListener('click', (e) => {
             globalSnapEnabled = !globalSnapEnabled;
@@ -201,7 +244,7 @@
 
         document.getElementById('btn-shrink').addEventListener('click', () => {
             if (points.length !== 4) return;
-            const d = 1; // Scalpel mode: 1px per click
+            const d = 1; 
             let newLines = [];
             
             for (let i = 0; i < 4; i++) {
