@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer</title>
+    <title>Photo Scan Deskewer Pro</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -33,7 +33,7 @@
 <body>
 
     <div class="toolbar">
-        <span id="status">Loading OpenCV.js (this takes a few seconds)...</span>
+        <span id="status">Loading OpenCV.js...</span>
         <input type="file" id="upload" accept="image/*" disabled>
         <button id="btn-extract" disabled>Crop & Download</button>
     </div>
@@ -44,22 +44,25 @@
 
     <canvas id="hidden-canvas" style="display:none;"></canvas>
 
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/piexifjs/1.0.6/piexif.min.js"></script>
 
     <script>
         let cvReady = false;
         let imgElement = new Image();
-        let originalMat, displayMat;
+        let originalMat;
         let scaleRatio = 1;
+        
+        // File and Metadata states
+        let originalFileName = "scan";
+        let savedExifData = null;
         
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const hiddenCanvas = document.getElementById('hidden-canvas');
         
-        // Bounding box points: Top-Left, Top-Right, Bottom-Right, Bottom-Left
         let points = [];
-        let draggingPoint = -1;
-        let draggingEdge = -1;
+        let draggingPoint = -1, draggingEdge = -1;
         let dragOffsetX = 0, dragOffsetY = 0;
 
         function onOpenCvReady() {
@@ -69,19 +72,37 @@
         }
 
         document.getElementById('upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // 1. Setup dynamic filename
+            const lastDot = file.name.lastIndexOf('.');
+            originalFileName = lastDot === -1 ? file.name : file.name.substring(0, lastDot);
+
+            // 2. Read file to extract EXIF and display image
             const reader = new FileReader();
             reader.onload = (event) => {
+                const dataURL = event.target.result;
+                
+                // Attempt to rip EXIF if it's a JPEG
+                savedExifData = null;
+                if (dataURL.startsWith("data:image/jpeg")) {
+                    try {
+                        const exifObj = piexif.load(dataURL);
+                        savedExifData = piexif.dump(exifObj);
+                    } catch (err) { console.warn("Could not extract EXIF data."); }
+                }
+
                 imgElement.onload = () => { processImageLoad(); }
-                imgElement.src = event.target.result;
+                imgElement.src = dataURL;
             };
-            reader.readAsDataURL(e.target.files[0]);
+            reader.readAsDataURL(file);
         });
 
         function processImageLoad() {
             if (originalMat) originalMat.delete();
             originalMat = cv.imread(imgElement);
             
-            // Calculate scale to fit screen
             const maxWidth = window.innerWidth * 0.8;
             const maxHeight = window.innerHeight * 0.7;
             scaleRatio = Math.min(maxWidth / originalMat.cols, maxHeight / originalMat.rows, 1);
@@ -89,19 +110,73 @@
             canvas.width = originalMat.cols * scaleRatio;
             canvas.height = originalMat.rows * scaleRatio;
             
-            // Initial bounding box (inset by 10%)
-            const w = canvas.width, h = canvas.height;
-            const inset = Math.min(w, h) * 0.1;
-            points = [
-                { x: inset, y: inset },
-                { x: w - inset, y: inset },
-                { x: w - inset, y: h - inset },
-                { x: inset, y: h - inset }
-            ];
+            // Draw initial scaled image to canvas so OpenCV can analyze it
+            ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
+            
+            // Run Auto-Detect
+            autoDetectCorners();
 
             document.getElementById('btn-extract').disabled = false;
-            document.getElementById('status').innerText = "Drag corners or edges to align.";
+            document.getElementById('status').innerText = "Auto-detected frame. Adjust if needed.";
             draw();
+        }
+
+        function autoDetectCorners() {
+            let src = cv.imread('canvas'); // Read the scaled-down version for speed
+            let gray = new cv.Mat();
+            let blur = new cv.Mat();
+            let edges = new cv.Mat();
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+
+            // Grayscale -> Blur -> Canny Edge Detection
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            cv.Canny(blur, edges, 75, 200);
+
+            // Find Contours
+            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+            let maxArea = 0;
+            let bestPoints = null;
+
+            // Find the largest 4-point polygon
+            for (let i = 0; i < contours.size(); ++i) {
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt);
+                if (area > maxArea && area > (canvas.width * canvas.height * 0.1)) { // Must be at least 10% of image
+                    let perimeter = cv.arcLength(cnt, true);
+                    let approx = new cv.Mat();
+                    cv.approxPolyDP(cnt, approx, 0.04 * perimeter, true);
+                    
+                    if (approx.rows === 4) {
+                        maxArea = area;
+                        let pts = [];
+                        for (let j = 0; j < 4; j++) {
+                            pts.push({ x: approx.data32S[j*2], y: approx.data32S[j*2+1] });
+                        }
+                        bestPoints = pts;
+                    }
+                    approx.delete();
+                }
+            }
+
+            // Cleanup Mats
+            src.delete(); gray.delete(); blur.delete(); edges.delete(); contours.delete(); hierarchy.delete();
+
+            if (bestPoints) {
+                // Sort points mathematically: Top-Left, Top-Right, Bottom-Right, Bottom-Left
+                bestPoints.sort((a, b) => a.y - b.y); // Sort by Y
+                let top = bestPoints.slice(0, 2).sort((a, b) => a.x - b.x); // Leftmost is TL
+                let bottom = bestPoints.slice(2, 4).sort((a, b) => b.x - a.x); // Rightmost is BR
+                points = [top[0], top[1], bottom[0], bottom[1]];
+            } else {
+                // Fallback if it fails to find a clear rectangle
+                console.log("Auto-detect failed, using fallback.");
+                const w = canvas.width, h = canvas.height;
+                const inset = Math.min(w, h) * 0.1;
+                points = [{x: inset, y: inset}, {x: w-inset, y: inset}, {x: w-inset, y: h-inset}, {x: inset, y: h-inset}];
+            }
         }
 
         function draw() {
@@ -109,7 +184,6 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
-            // Draw Polygon Area
             ctx.fillStyle = 'rgba(0, 120, 212, 0.2)';
             ctx.beginPath();
             ctx.moveTo(points[0].x, points[0].y);
@@ -117,12 +191,10 @@
             ctx.closePath();
             ctx.fill();
 
-            // Draw Edges
             ctx.strokeStyle = '#0078d4';
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // Draw Corners
             ctx.fillStyle = '#fff';
             points.forEach(p => {
                 ctx.beginPath();
@@ -132,13 +204,6 @@
             });
         }
 
-        // --- INTERACTION LOGIC ---
-        function getMousePos(e) {
-            const rect = canvas.getBoundingClientRect();
-            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-        }
-
-        // Math helper: distance from point to line segment
         function distToSegment(p, v, w) {
             const l2 = (v.x - w.x)**2 + (v.y - w.y)**2;
             if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
@@ -148,111 +213,77 @@
         }
 
         canvas.addEventListener('mousedown', (e) => {
-            const pos = getMousePos(e);
-            
-            // Check corners first
+            const rect = canvas.getBoundingClientRect();
+            const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
             for (let i = 0; i < 4; i++) {
-                if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 10) {
-                    draggingPoint = i;
-                    return;
-                }
+                if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 15) { draggingPoint = i; return; }
             }
-            
-            // Check edges
             for (let i = 0; i < 4; i++) {
-                const p1 = points[i];
-                const p2 = points[(i + 1) % 4];
-                if (distToSegment(pos, p1, p2) < 10) {
-                    draggingEdge = i;
-                    dragOffsetX = pos.x;
-                    dragOffsetY = pos.y;
-                    return;
+                if (distToSegment(pos, points[i], points[(i + 1) % 4]) < 10) {
+                    draggingEdge = i; dragOffsetX = pos.x; dragOffsetY = pos.y; return;
                 }
             }
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            const pos = getMousePos(e);
+            const rect = canvas.getBoundingClientRect();
+            const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
             
             if (draggingPoint !== -1) {
-                points[draggingPoint].x = pos.x;
-                points[draggingPoint].y = pos.y;
+                points[draggingPoint] = pos;
                 draw();
             } else if (draggingEdge !== -1) {
                 const dx = pos.x - dragOffsetX;
                 const dy = pos.y - dragOffsetY;
-                
-                const p1 = draggingEdge;
-                const p2 = (draggingEdge + 1) % 4;
-                
-                points[p1].x += dx; points[p1].y += dy;
-                points[p2].x += dx; points[p2].y += dy;
-                
+                points[draggingEdge].x += dx; points[draggingEdge].y += dy;
+                points[(draggingEdge + 1) % 4].x += dx; points[(draggingEdge + 1) % 4].y += dy;
                 dragOffsetX = pos.x; dragOffsetY = pos.y;
                 draw();
-            } else {
-                // Change cursor based on hover
-                let cursor = 'default';
-                for (let i = 0; i < 4; i++) {
-                    if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 10) cursor = 'crosshair';
-                    else if (distToSegment(pos, points[i], points[(i+1)%4]) < 10) cursor = 'move';
-                }
-                canvas.style.cursor = cursor;
             }
         });
 
-        window.addEventListener('mouseup', () => {
-            draggingPoint = -1;
-            draggingEdge = -1;
-        });
+        window.addEventListener('mouseup', () => { draggingPoint = -1; draggingEdge = -1; });
 
-        // --- OPENCV EXTRACTION LOGIC ---
         document.getElementById('btn-extract').addEventListener('click', () => {
             if (!originalMat) return;
             
-            // Scale points back to original image resolution
             const srcCoords = [];
-            points.forEach(p => {
-                srcCoords.push(p.x / scaleRatio, p.y / scaleRatio);
-            });
+            points.forEach(p => { srcCoords.push(p.x / scaleRatio, p.y / scaleRatio); });
 
-            // Calculate destination rectangle size (max width/height of the quad)
-            const w1 = Math.hypot(srcCoords[4] - srcCoords[6], srcCoords[5] - srcCoords[7]); // bottom
-            const w2 = Math.hypot(srcCoords[0] - srcCoords[2], srcCoords[1] - srcCoords[3]); // top
-            const h1 = Math.hypot(srcCoords[2] - srcCoords[4], srcCoords[3] - srcCoords[5]); // right
-            const h2 = Math.hypot(srcCoords[0] - srcCoords[6], srcCoords[1] - srcCoords[7]); // left
+            const w1 = Math.hypot(srcCoords[4] - srcCoords[6], srcCoords[5] - srcCoords[7]); 
+            const w2 = Math.hypot(srcCoords[0] - srcCoords[2], srcCoords[1] - srcCoords[3]); 
+            const h1 = Math.hypot(srcCoords[2] - srcCoords[4], srcCoords[3] - srcCoords[5]); 
+            const h2 = Math.hypot(srcCoords[0] - srcCoords[6], srcCoords[1] - srcCoords[7]); 
             
             const maxWidth = Math.max(w1, w2);
             const maxHeight = Math.max(h1, h2);
 
-            const dstCoords = [
-                0, 0,
-                maxWidth, 0,
-                maxWidth, maxHeight,
-                0, maxHeight
-            ];
+            const dstCoords = [0, 0, maxWidth, 0, maxWidth, maxHeight, 0, maxHeight];
 
-            // Create Mats for the transform
             let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, srcCoords);
             let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, dstCoords);
             let M = cv.getPerspectiveTransform(srcTri, dstTri);
             let warpedDst = new cv.Mat();
             let dsize = new cv.Size(maxWidth, maxHeight);
 
-            // Apply warp
             cv.warpPerspective(originalMat, warpedDst, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
 
-            // Draw to hidden canvas to download
             cv.imshow('hidden-canvas', warpedDst);
-            const dataURL = hiddenCanvas.toDataURL('image/jpeg', 0.95);
             
-            // Trigger Download
+            // 3. Generate JPEG Data URL and re-inject EXIF if available
+            let dataURL = hiddenCanvas.toDataURL('image/jpeg', 0.95);
+            if (savedExifData) {
+                try {
+                    dataURL = piexif.insert(savedExifData, dataURL);
+                } catch (err) { console.warn("Failed to re-inject EXIF."); }
+            }
+            
+            // 4. Trigger Download with dynamic name
             const a = document.createElement('a');
             a.href = dataURL;
-            a.download = 'fixed_scan.jpg';
+            a.download = `${originalFileName}-fixed.jpg`;
             a.click();
 
-            // Cleanup
             srcTri.delete(); dstTri.delete(); M.delete(); warpedDst.delete();
         });
     </script>
