@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer Pro V9</title>
+    <title>Photo Scan Deskewer Pro V10</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -41,9 +41,24 @@
         .debug-box p { margin: 0 0 2px 0; font-size: 0.7em; color: #aaa; }
         .debug-canvas { height: 50px; border: 1px solid #444; background: #000; cursor: crosshair;}
         
-        #canvas-wrapper {
+        #workspace {
             flex-grow: 1; width: 100%; display: flex; justify-content: center; align-items: center;
-            border: 2px dashed #555; background: #000; overflow: hidden; position: relative;
+            position: relative; overflow: hidden;
+        }
+        
+        #instructions {
+            max-width: 650px; background: #2d2d2d; padding: 30px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #444; line-height: 1.6;
+        }
+        #instructions h2 { margin-top: 0; color: #0078d4; }
+        #instructions ol { padding-left: 20px; margin-bottom: 0; }
+        #instructions li { margin-bottom: 12px; }
+        #instructions li:last-child { margin-bottom: 0; }
+        
+        #canvas-wrapper {
+            display: none; width: 100%; height: 100%; 
+            border: 2px dashed #555; background: #000; position: relative;
+            justify-content: center; align-items: center;
         }
         canvas { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
         
@@ -53,22 +68,22 @@
 <body>
 
     <div class="toolbar">
-        <span id="status">Loading OpenCV.js...</span>
+        <span id="status">Wczytywanie OpenCV.js...</span>
         <input type="file" id="upload" accept="image/*" disabled>
         
         <div class="controls">
             <div class="slider-group">
-                <span><label>Rail Sensitivity</label><output id="out-canny">40</output></span>
+                <span><label>Czułość krawędzi</label><output id="out-canny">40</output></span>
                 <input type="range" id="cv-canny" min="10" max="150" value="40" disabled>
             </div>
             <div class="slider-group">
-                <span><label>Min Line Length (%)</label><output id="out-length">20</output></span>
+                <span><label>Min. dł. linii (%)</label><output id="out-length">20</output></span>
                 <input type="range" id="cv-length" min="5" max="60" value="20" disabled>
             </div>
         </div>
 
-        <button id="btn-snap" disabled title="Hold Shift while dragging to temporarily invert">Snapping: ON</button>
-        <button id="btn-shrink" disabled title="Shrink inward by 5px without changing angles">Shrink 5px</button>
+        <button id="btn-snap" disabled title="Przytrzymaj Shift podczas przeciągania, aby tymczasowo przełączyć">Snapping: ON</button>
+        <button id="btn-shrink" disabled title="Zmniejsz obszar o 1px z każdej strony bez zmiany kątów">Shrink 1px</button>
         <button id="btn-extract" disabled>Crop & Download</button>
 
         <div class="debug-container">
@@ -77,8 +92,22 @@
         </div>
     </div>
 
-    <div id="canvas-wrapper">
-        <canvas id="canvas"></canvas>
+    <div id="workspace">
+        <div id="instructions">
+            <h2>Jak korzystać z narzędzia</h2>
+            <ol>
+                <li><strong>Wgraj skan:</strong> Użyj przycisku po lewej stronie, aby załadować zeskanowane zdjęcie.</li>
+                <li><strong>Ustaw zgrubne ramki (Snapping):</strong> Złap za krawędź niebieskiego prostokąta i przeciągnij ją w stronę brzegu zdjęcia. Krawędź automatycznie "przyklei się" do wykrytych prostych linii.</li>
+                <li><strong>Dostosuj wykrywanie (Opcjonalnie):</strong> Jeśli linie są słabo wykrywane, przesuń suwaki "Czułość krawędzi" lub "Min. dł. linii", obserwując podgląd w prawym górnym rogu.</li>
+                <li><strong>Precyzyjne poprawki:</strong> Kliknij przycisk "Snapping: ON", aby wyłączyć przyciąganie (lub przytrzymaj klawisz <code>Shift</code>). Teraz możesz płynnie przesuwać krawędzie i rogi, aby idealnie dopasować je do krzywizn zdjęcia.</li>
+                <li><strong>Odetnij margines:</strong> Kliknij przycisk "Shrink 1px" kilka razy, aby błyskawicznie ścisnąć ramkę i pozbyć się niechcianych, milimetrowych marginesów ze skanera – bez psucia ustawionych kątów!</li>
+                <li><strong>Zapisz:</strong> Kliknij "Crop & Download", aby pobrać idealnie wykadrowane i wyprostowane zdjęcie.</li>
+            </ol>
+        </div>
+
+        <div id="canvas-wrapper">
+            <canvas id="canvas"></canvas>
+        </div>
     </div>
 
     <canvas id="hidden-canvas" style="display:none;"></canvas>
@@ -99,6 +128,7 @@
         const ctx = canvas.getContext('2d');
         const hiddenCanvas = document.getElementById('hidden-canvas');
         const canvasWrapper = document.getElementById('canvas-wrapper');
+        const instructions = document.getElementById('instructions');
         
         let points = [];
         let magneticRails = [];
@@ -111,7 +141,7 @@
 
         function onOpenCvReady() {
             cvReady = true;
-            document.getElementById('status').innerText = "Ready. Upload a scan.";
+            document.getElementById('status').innerText = "Gotowe. Wgraj skan.";
             document.getElementById('upload').disabled = false;
         }
 
@@ -136,6 +166,9 @@
         });
 
         function processImageLoad() {
+            instructions.style.display = 'none';
+            canvasWrapper.style.display = 'flex';
+
             if (originalMat) { originalMat.delete(); displayMat.delete(); }
             originalMat = cv.imread(imgElement);
             displayMat = new cv.Mat();
@@ -168,10 +201,9 @@
 
         document.getElementById('btn-shrink').addEventListener('click', () => {
             if (points.length !== 4) return;
-            const d = 5; // Pixel amount to shrink per click
+            const d = 1; // Scalpel mode: 1px per click
             let newLines = [];
             
-            // Calculate the 4 new lines shifted inward
             for (let i = 0; i < 4; i++) {
                 let A = points[i];
                 let B = points[(i + 1) % 4];
@@ -179,7 +211,6 @@
                 let dy = B.y - A.y;
                 let len = Math.hypot(dx, dy);
                 
-                // Normal vector pointing inward (clockwise winding)
                 let nx = -dy / len;
                 let ny = dx / len;
                 
@@ -189,7 +220,6 @@
                 });
             }
             
-            // Recalculate the 4 intersections of the new lines
             let newPoints = [];
             for (let i = 0; i < 4; i++) {
                 let linePrev = newLines[(i + 3) % 4];
@@ -267,7 +297,7 @@
             cv.resize(colorLines, dLines, new cv.Size(0,0), 50/colorLines.rows, 50/colorLines.rows);
             cv.imshow('debug-lines', dLines);
 
-            document.getElementById('status').innerText = `Found ${magneticRails.length} clean rails.`;
+            document.getElementById('status').innerText = `Wykryto ${magneticRails.length} linii.`;
 
             gray.delete(); blurred.delete(); edges.delete(); kernel.delete();
             contours.delete(); hierarchy.delete(); colorLines.delete(); dEdges.delete(); dLines.delete();
