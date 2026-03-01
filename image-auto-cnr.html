@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer Pro V3</title>
+    <title>Photo Scan Deskewer Pro V4</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -13,13 +13,14 @@
         .toolbar {
             background: #2d2d2d; padding: 15px; border-radius: 8px;
             margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3); max-width: 90vw;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3); max-width: 95vw; justify-content: center;
         }
         .controls {
             display: flex; gap: 15px; align-items: center;
-            border-left: 2px solid #444; padding-left: 15px;
+            border-left: 2px solid #444; border-right: 2px solid #444; padding: 0 15px;
         }
-        .slider-group { display: flex; flex-direction: column; font-size: 0.8em; color: #bbb; }
+        .slider-group { display: flex; flex-direction: column; font-size: 0.8em; color: #bbb; min-width: 120px;}
+        .slider-group span { display: flex; justify-content: space-between; margin-bottom: 4px; }
         button, input[type="file"]::file-selector-button {
             background: #0078d4; color: white; border: none;
             padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;
@@ -29,19 +30,19 @@
         
         #canvas-container {
             position: relative; border: 2px dashed #555; background: #000;
-            max-width: 90vw; max-height: 65vh; overflow: hidden;
+            max-width: 90vw; max-height: 60vh; overflow: hidden;
         }
         canvas { display: block; }
         
         #debug-container {
             display: flex; gap: 20px; margin-top: 20px; max-width: 90vw;
-            overflow-x: auto; padding-bottom: 10px;
+            overflow-x: auto; padding-bottom: 10px; justify-content: center;
         }
         .debug-box { display: flex; flex-direction: column; align-items: center; }
         .debug-box p { margin: 0 0 5px 0; font-size: 0.8em; color: #aaa; }
-        .debug-canvas { max-height: 150px; border: 1px solid #444; background: #000; }
+        .debug-canvas { max-height: 180px; border: 1px solid #444; background: #000; }
         
-        #status { font-size: 0.9em; color: #aaa; min-width: 250px; }
+        #status { font-size: 0.9em; color: #aaa; min-width: 220px; }
     </style>
 </head>
 <body>
@@ -52,12 +53,20 @@
         
         <div class="controls">
             <div class="slider-group">
-                <label>Edge Sensitivity (Min)</label>
-                <input type="range" id="canny-t1" min="10" max="150" value="50" disabled>
+                <span><label>Blur (Kill Noise)</label><output id="out-blur">15</output></span>
+                <input type="range" id="cv-blur" min="1" max="51" step="2" value="15" disabled>
             </div>
             <div class="slider-group">
-                <label>Edge Sensitivity (Max)</label>
-                <input type="range" id="canny-t2" min="50" max="250" value="150" disabled>
+                <span><label>Edge Sens (Min)</label><output id="out-t1">30</output></span>
+                <input type="range" id="cv-t1" min="10" max="150" value="30" disabled>
+            </div>
+            <div class="slider-group">
+                <span><label>Edge Sens (Max)</label><output id="out-t2">100</output></span>
+                <input type="range" id="cv-t2" min="50" max="250" value="100" disabled>
+            </div>
+            <div class="slider-group">
+                <span><label>Edge Thickness</label><output id="out-dilate">3</output></span>
+                <input type="range" id="cv-dilate" min="0" max="15" value="3" disabled>
             </div>
         </div>
 
@@ -70,11 +79,11 @@
 
     <div id="debug-container">
         <div class="debug-box">
-            <p>1. Grayscale View</p>
+            <p>1. Blurred Grayscale</p>
             <canvas id="debug-gray" class="debug-canvas"></canvas>
         </div>
         <div class="debug-box">
-            <p>2. Canny Edge Detection (What the bot sees)</p>
+            <p>2. Canny + Dilate (Bot Vision)</p>
             <canvas id="debug-edges" class="debug-canvas"></canvas>
         </div>
     </div>
@@ -134,25 +143,28 @@
             displayMat = new cv.Mat();
             
             const maxWidth = window.innerWidth * 0.8;
-            const maxHeight = window.innerHeight * 0.65;
+            const maxHeight = window.innerHeight * 0.60;
             scaleRatio = Math.min(maxWidth / originalMat.cols, maxHeight / originalMat.rows, 1);
             
             canvas.width = originalMat.cols * scaleRatio;
             canvas.height = originalMat.rows * scaleRatio;
             
-            // Create a clean resized matrix for processing
             cv.resize(originalMat, displayMat, new cv.Size(canvas.width, canvas.height));
             
-            document.getElementById('canny-t1').disabled = false;
-            document.getElementById('canny-t2').disabled = false;
-            document.getElementById('btn-extract').disabled = false;
+            ['cv-blur', 'cv-t1', 'cv-t2', 'cv-dilate', 'btn-extract'].forEach(id => {
+                document.getElementById(id).disabled = false;
+            });
             
             autoDetectCorners();
         }
 
-        // Re-run detection when sliders change
-        document.getElementById('canny-t1').addEventListener('input', autoDetectCorners);
-        document.getElementById('canny-t2').addEventListener('input', autoDetectCorners);
+        // Hook up sliders to update logic and outputs
+        ['cv-blur', 'cv-t1', 'cv-t2', 'cv-dilate'].forEach(id => {
+            document.getElementById(id).addEventListener('input', (e) => {
+                document.getElementById('out-' + id.split('-')[1]).innerText = e.target.value;
+                autoDetectCorners();
+            });
+        });
 
         function autoDetectCorners() {
             if (!displayMat) return;
@@ -163,17 +175,31 @@
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
 
-            let t1 = parseInt(document.getElementById('canny-t1').value);
-            let t2 = parseInt(document.getElementById('canny-t2').value);
+            let blurVal = parseInt(document.getElementById('cv-blur').value);
+            let t1 = parseInt(document.getElementById('cv-t1').value);
+            let t2 = parseInt(document.getElementById('cv-t2').value);
+            let dilateVal = parseInt(document.getElementById('cv-dilate').value);
 
+            // 1. Grayscale
             cv.cvtColor(displayMat, gray, cv.COLOR_RGBA2GRAY, 0);
-            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            
+            // 2. Heavy Blur to kill internal texture
+            cv.GaussianBlur(gray, blur, new cv.Size(blurVal, blurVal), 0, 0, cv.BORDER_DEFAULT);
+            cv.imshow('debug-gray', blur); // Show blurred version in debug
+
+            // 3. Canny Edge Detection
             cv.Canny(blur, edges, t1, t2);
 
-            // Render to debug canvases
-            cv.imshow('debug-gray', gray);
-            cv.imshow('debug-edges', edges);
+            // 4. Dilate to thicken edges and close gaps
+            if (dilateVal > 0) {
+                let M = cv.Mat.ones(dilateVal, dilateVal, cv.CV_8U);
+                cv.dilate(edges, edges, M, new cv.Point(-1, -1), 1, cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
+                M.delete();
+            }
 
+            cv.imshow('debug-edges', edges); // Show dilated edges
+
+            // 5. Find Contours
             cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let maxArea = 0;
@@ -182,10 +208,9 @@
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                if (area > (canvas.width * canvas.height * 0.05)) { // relaxed to 5% min area
+                if (area > (canvas.width * canvas.height * 0.05)) { 
                     let perimeter = cv.arcLength(cnt, true);
                     let approx = new cv.Mat();
-                    // 0.04 multiplier controls how aggressively it simplifies shapes into lines
                     cv.approxPolyDP(cnt, approx, 0.04 * perimeter, true); 
                     
                     if (approx.rows === 4 && area > maxArea) {
