@@ -2,19 +2,20 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Photo Scan Deskewer Pro V12</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Photo Scan Deskewer Pro V13</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
             background: #1e1e1e; color: #fff;
             margin: 0; padding: 15px;
-            height: 100vh; box-sizing: border-box;
+            height: 100vh; height: 100dvh; box-sizing: border-box;
             display: flex; flex-direction: column; align-items: center;
-            overflow: hidden;
+            overflow: hidden; touch-action: none;
         }
         .toolbar {
             background: #2d2d2d; padding: 10px 15px; border-radius: 8px;
-            margin-bottom: 15px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;
+            margin-bottom: 15px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3); width: 100%; box-sizing: border-box;
             flex-shrink: 0; justify-content: center;
         }
@@ -22,12 +23,12 @@
             display: flex; gap: 15px; align-items: center;
             border-left: 2px solid #444; border-right: 2px solid #444; padding: 0 15px;
         }
-        .slider-group { display: flex; flex-direction: column; font-size: 0.8em; color: #bbb; min-width: 120px;}
+        .slider-group { display: flex; flex-direction: column; font-size: 0.8em; color: #bbb; min-width: 110px;}
         .slider-group span { display: flex; justify-content: space-between; margin-bottom: 4px; }
         
         button, input[type="file"]::file-selector-button {
             background: #0078d4; color: white; border: none;
-            padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;
+            padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
         }
         button:hover, input[type="file"]::file-selector-button:hover { background: #005a9e; }
         button:disabled { background: #555; cursor: not-allowed; opacity: 0.7; }
@@ -36,7 +37,7 @@
         .transform-group button { background: #5c2d91; padding: 8px 12px; font-size: 1.1em; }
         .transform-group button:hover { background: #4b2377; }
         
-        #btn-snap { background: #107c10; width: 120px; }
+        #btn-snap { background: #107c10; width: 110px; }
         #btn-snap.off { background: #c50f1f; }
         #btn-shrink { background: #d97706; }
         #btn-shrink:hover { background: #b45309; }
@@ -44,7 +45,7 @@
         .debug-container { display: flex; gap: 10px; align-items: center; }
         .debug-box { display: flex; flex-direction: column; align-items: center; }
         .debug-box p { margin: 0 0 2px 0; font-size: 0.7em; color: #aaa; }
-        .debug-canvas { height: 50px; border: 1px solid #444; background: #000; cursor: crosshair;}
+        .debug-canvas { height: 40px; border: 1px solid #444; background: #000; cursor: crosshair;}
         
         #workspace {
             flex-grow: 1; width: 100%; display: flex; justify-content: center; align-items: center;
@@ -52,12 +53,13 @@
         }
         
         #instructions {
-            max-width: 650px; background: #2d2d2d; padding: 30px; border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #444; line-height: 1.6;
+            max-width: 650px; background: #2d2d2d; padding: 25px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #444; line-height: 1.5;
+            font-size: 0.95em; overflow-y: auto; max-height: 100%;
         }
-        #instructions h2 { margin-top: 0; color: #0078d4; }
+        #instructions h2 { margin-top: 0; color: #0078d4; font-size: 1.3em;}
         #instructions ol { padding-left: 20px; margin-bottom: 0; }
-        #instructions li { margin-bottom: 12px; }
+        #instructions li { margin-bottom: 10px; }
         #instructions li:last-child { margin-bottom: 0; }
         
         #canvas-wrapper {
@@ -65,9 +67,14 @@
             border: 2px dashed #555; background: #000; position: relative;
             justify-content: center; align-items: center;
         }
-        canvas { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+        canvas { display: block; max-width: 100%; max-height: 100%; object-fit: contain; touch-action: none; }
         
-        #status { font-size: 0.9em; color: #aaa; min-width: 140px; }
+        #status { font-size: 0.85em; color: #aaa; min-width: 120px; text-align: center;}
+        
+        @media (max-width: 768px) {
+            .controls { border: none; padding: 0; width: 100%; justify-content: center; margin-top: 5px;}
+            .toolbar { gap: 8px; padding: 10px; }
+        }
     </style>
 </head>
 <body>
@@ -77,8 +84,8 @@
         <input type="file" id="upload" accept="image/*" disabled>
         
         <div class="transform-group">
-            <button id="btn-rot-l" disabled title="Obróć w lewo (90°)">↶</button>
-            <button id="btn-rot-r" disabled title="Obróć w prawo (90°)">↷</button>
+            <button id="btn-rot-l" disabled title="Obróć w lewo">↶</button>
+            <button id="btn-rot-r" disabled title="Obróć w prawo">↷</button>
             <button id="btn-flip-h" disabled title="Odbij w poziomie">↔</button>
             <button id="btn-flip-v" disabled title="Odbij w pionie">↕</button>
         </div>
@@ -94,8 +101,8 @@
             </div>
         </div>
 
-        <button id="btn-snap" disabled title="Przytrzymaj Shift podczas przeciągania, aby tymczasowo przełączyć">Snapping: ON</button>
-        <button id="btn-shrink" disabled title="Zmniejsz obszar o 1px z każdej strony bez zmiany kątów">Shrink 1px</button>
+        <button id="btn-snap" disabled>Snapping: ON</button>
+        <button id="btn-shrink" disabled title="Zmniejsz obszar o 1px z każdej strony">Shrink 1px</button>
         <button id="btn-extract" disabled>Crop & Download</button>
 
         <div class="debug-container">
@@ -108,13 +115,13 @@
         <div id="instructions">
             <h2>Jak korzystać z narzędzia</h2>
             <ol>
-                <li><strong>Wgraj skan:</strong> Użyj przycisku po lewej stronie, aby załadować zeskanowane zdjęcie.</li>
-                <li><strong>Obróć i odbij (Opcjonalnie):</strong> Jeśli skan jest do góry nogami lub w złej orientacji, użyj fioletowych przycisków ze strzałkami (↶ ↷ ↔ ↕), aby go odpowiednio ustawić. Operacje te są w 100% bezstratne.</li>
-                <li><strong>Ustaw zgrubne ramki (Snapping):</strong> Złap za krawędź niebieskiego prostokąta i przeciągnij ją w stronę brzegu zdjęcia. Krawędź automatycznie "przyklei się" do wykrytych prostych linii.</li>
-                <li><strong>Dostosuj wykrywanie (Opcjonalnie):</strong> Jeśli linie są słabo wykrywane, przesuń suwaki "Czułość krawędzi" lub "Min. dł. linii", obserwując podgląd w prawym górnym rogu.</li>
-                <li><strong>Precyzyjne poprawki:</strong> Kliknij przycisk "Snapping: ON", aby wyłączyć przyciąganie (lub przytrzymaj klawisz <code>Shift</code>). Teraz możesz płynnie przesuwać krawędzie i rogi, aby idealnie dopasować je do krzywizn zdjęcia.</li>
-                <li><strong>Odetnij margines:</strong> Kliknij przycisk "Shrink 1px" kilka razy, aby błyskawicznie ścisnąć ramkę i pozbyć się niechcianych, milimetrowych marginesów ze skanera – bez psucia ustawionych kątów.</li>
-                <li><strong>Zapisz:</strong> Kliknij "Crop & Download", aby pobrać idealnie wykadrowane i wyprostowane zdjęcie.</li>
+                <li><strong>Wgraj skan:</strong> Użyj przycisku, aby załadować zeskanowane zdjęcie.</li>
+                <li><strong>Obróć i odbij (Opcjonalnie):</strong> Jeśli skan jest w złej orientacji, użyj fioletowych przycisków (↶ ↷ ↔ ↕), aby go odpowiednio ustawić (operacja w 100% bezstratna).</li>
+                <li><strong>Ustaw zgrubne ramki:</strong> Złap za krawędź niebieskiego prostokąta i przeciągnij ją. Krawędź automatycznie "przyklei się" do wykrytych prostych linii.</li>
+                <li><strong>Dostosuj wykrywanie (Opcjonalnie):</strong> Jeśli linie są słabo wykrywane, przesuń suwaki "Czułość" lub "Min. dł. linii".</li>
+                <li><strong>Precyzyjne poprawki:</strong> Kliknij "Snapping: ON", aby wyłączyć przyciąganie (lub użyj klawisza <code>Shift</code> na PC). Teraz możesz płynnie dopasować krawędzie do krzywizn zdjęcia.</li>
+                <li><strong>Odetnij margines:</strong> Kliknij "Shrink 1px" kilka razy, aby błyskawicznie ścisnąć ramkę i pozbyć się milimetrowych marginesów ze skanera bez psucia kątów.</li>
+                <li><strong>Zapisz:</strong> Kliknij "Crop & Download", aby pobrać gotowe zdjęcie.</li>
             </ol>
         </div>
 
@@ -408,32 +415,42 @@
             }
 
             ctx.fillStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeStyle = '#0078d4';
-            points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); });
+            points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); });
         }
 
-        // --- INTERACTION ---
-        canvas.addEventListener('mousedown', (e) => {
+        // --- UNIFIED POINTER INTERACTION (Mouse + Touch) ---
+        function getPos(e) {
             const rect = canvas.getBoundingClientRect();
-            const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            let cx = e.clientX, cy = e.clientY;
+            if (e.touches && e.touches.length > 0) {
+                cx = e.touches[0].clientX;
+                cy = e.touches[0].clientY;
+            }
+            return { x: cx - rect.left, y: cy - rect.top };
+        }
+
+        function handleStart(e) {
+            if (e.cancelable && e.type.startsWith('touch')) e.preventDefault();
+            const pos = getPos(e);
             
             for (let i = 0; i < 4; i++) {
-                if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 15) { 
+                if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 20) { 
                     draggingPoint = i; return; 
                 }
             }
             for (let i = 0; i < 4; i++) {
-                if (distToSegment(pos, points[i], points[(i + 1) % 4]) < 10) {
+                if (distToSegment(pos, points[i], points[(i + 1) % 4]) < 20) {
                     draggingEdge = i; 
                     dragOffsetX = pos.x; dragOffsetY = pos.y; 
                     dragStartPoints = JSON.parse(JSON.stringify(points));
                     return;
                 }
             }
-        });
+        }
 
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        function handleMove(e) {
+            if (e.cancelable && e.type.startsWith('touch')) e.preventDefault();
+            const pos = getPos(e);
             
             if (draggingPoint !== -1) { 
                 points[draggingPoint] = pos; 
@@ -452,7 +469,7 @@
                 let targetLineP1 = {x: p1.x + dx, y: p1.y + dy};
                 let targetLineP2 = {x: p2.x + dx, y: p2.y + dy};
                 
-                let effectiveSnap = globalSnapEnabled !== e.shiftKey;
+                let effectiveSnap = globalSnapEnabled !== !!e.shiftKey;
                 isSnapped = false;
 
                 if (effectiveSnap) {
@@ -474,14 +491,27 @@
             } else {
                 let cursor = 'crosshair';
                 for (let i=0; i<4; i++) {
-                    if (distToSegment(pos, points[i], points[(i+1)%4]) < 10) cursor = 'move';
-                    if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 15) cursor = 'pointer';
+                    if (distToSegment(pos, points[i], points[(i+1)%4]) < 15) cursor = 'move';
+                    if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 20) cursor = 'pointer';
                 }
                 canvas.style.cursor = cursor;
             }
-        });
+        }
 
-        window.addEventListener('mouseup', () => { draggingPoint = -1; draggingEdge = -1; isSnapped = false; draw(); });
+        function handleEnd() { 
+            draggingPoint = -1; draggingEdge = -1; isSnapped = false; draw(); 
+        }
+
+        // Attach Mouse Events
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+
+        // Attach Touch Events (passive: false is critical to allow preventDefault)
+        canvas.addEventListener('touchstart', handleStart, {passive: false});
+        canvas.addEventListener('touchmove', handleMove, {passive: false});
+        window.addEventListener('touchend', handleEnd);
+        window.addEventListener('touchcancel', handleEnd);
 
         document.getElementById('btn-extract').addEventListener('click', () => {
             if (!originalMat) return;
