@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quick Annotator</title>
+    <style>
+        :root {
+            --bg: #1e1e2e;
+            --panel: #313244;
+            --text: #cdd6f4;
+            --accent: #89b4fa;
+            --danger: #f38ba8;
+            --border: #45475a;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            touch-action: none; /* Prevent pull-to-refresh and pinch-zoom on body */
+        }
+
+        /* Toolbars */
+        .toolbar {
+            background: var(--panel);
+            padding: 8px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            z-index: 10;
+            flex-wrap: wrap;
+        }
+        .toolbar.bottom {
+            border-bottom: none;
+            border-top: 1px solid var(--border);
+            padding-bottom: env(safe-area-inset-bottom, 8px);
+        }
+
+        button, label.btn {
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        button:active, label.btn:active { background: var(--border); }
+        button.active { background: var(--accent); color: #111; border-color: var(--accent); }
+        
+        .spacer { flex-grow: 1; }
+
+        /* Canvas Area */
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+            overflow: hidden;
+            background: #111;
+        }
+        canvas {
+            display: block;
+            touch-action: none;
+        }
+
+        /* Color Picker */
+        .color-picker {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding: 4px;
+            scrollbar-width: none;
+        }
+        .color-picker::-webkit-scrollbar { display: none; }
+        
+        .color-swatch {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            flex-shrink: 0;
+            box-shadow: 0 0 0 1px #000 inset;
+        }
+        .color-swatch.selected { border-color: white; transform: scale(1.1); }
+
+        /* Modal for Descriptions */
+        #desc-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        #desc-modal.open { display: flex; }
+        .modal-content {
+            background: var(--panel);
+            padding: 20px;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 500px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .modal-body {
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .desc-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .desc-row input {
+            flex-grow: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 8px;
+            border-radius: 4px;
+        }
+
+        input[type="file"] { display: none; }
+        
+        /* Utility */
+        .hidden { display: none !important; }
+        svg { width: 16px; height: 16px; fill: currentColor; }
+    </style>
+</head>
+<body>
+
+    <!-- Top Toolbar: I/O & Text -->
+    <div class="toolbar">
+        <label class="btn">
+            <input type="file" id="fileInput" accept="image/*">
+            <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg> Open
+        </label>
+        <button id="btnPaste" onclick="tryPaste()">
+            <svg viewBox="0 0 24 24"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg> Paste
+        </button>
+        
+        <div class="spacer"></div>
+
+        <button onclick="downloadImage()">
+            <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> DL PNG
+        </button>
+        <button onclick="copyImage()">
+            <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Img
+        </button>
+    </div>
+
+    <!-- Main Canvas -->
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <!-- Bottom Toolbar: Tools & Text output -->
+    <div class="toolbar bottom">
+        <button id="btnUndo" onclick="undo()" title="Undo">
+            <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+        </button>
+        <button id="btnMode" onclick="toggleMode()" class="active">
+            Outline
+        </button>
+        
+        <div class="color-picker" id="colorPicker">
+            <!-- Populated by JS -->
+        </div>
+
+        <div class="spacer"></div>
+
+        <button onclick="openDescriptions()">Desc</button>
+        <button onclick="copyText('en')">EN</button>
+        <button onclick="copyText('pl')">PL</button>
+    </div>
+
+    <!-- Descriptions Modal -->
+    <div id="desc-modal">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 8px;">Color Descriptions</h3>
+            <div class="modal-body" id="descList">
+                <!-- Populated by JS -->
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                <button onclick="document.getElementById('desc-modal').classList.remove('open')">Close & Save</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * APP STATE
+ */
+const COLORS = [
+    { hex: '#FF0000', name: 'Red', namePl: 'Czerwony' },
+    { hex: '#00FFFF', name: 'Cyan', namePl: 'Cyjan' },
+    { hex: '#00FF00', name: 'Lime', namePl: 'Limonkowy' },
+    { hex: '#FFFF00', name: 'Yellow', namePl: 'Żółty' },
+    { hex: '#FF00FF', name: 'Magenta', namePl: 'Magenta' },
+    { hex: '#FFA500', name: 'Orange', namePl: 'Pomarańczowy' },
+    { hex: '#0000FF', name: 'Blue', namePl: 'Niebieski' },
+    { hex: '#FFFFFF', name: 'White', namePl: 'Biały' },
+    { hex: '#000000', name: 'Black', namePl: 'Czarny' }
+];
+
+let state = {
+    imageObj: null, // HTMLImageElement
+    shapes: [],     // { type: 'stroke'|'fill', color: '#hex', x, y, w, h }
+    descriptions: {}, // { '#hex': 'text' }
+    mode: 'stroke', // 'stroke' or 'fill'
+    currentColor: COLORS[0].hex,
+    // Viewport
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0
+};
+
+/**
+ * INDEXEDDB WRAPPER (For saving large Base64 images reliably across reloads)
+ */
+const DB_NAME = 'QuickAnnotatorDB';
+const STORE_NAME = 'workspace';
+
+function getDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME);
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror = e => reject(e);
+    });
+}
+
+async function saveWorkspace() {
+    const db = await getDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    
+    // Only save what's necessary. Convert Image to Base64 if exists.
+    let imgBase64 = null;
+    if (state.imageObj) {
+        const tempCv = document.createElement('canvas');
+        tempCv.width = state.imageObj.width; tempCv.height = state.imageObj.height;
+        tempCv.getContext('2d').drawImage(state.imageObj, 0, 0);
+        imgBase64 = tempCv.toDataURL('image/png');
+    }
+
+    const payload = {
+        id: 'current',
+        imgBase64,
+        shapes: state.shapes,
+        descriptions: state.descriptions,
+        scale: state.scale,
+        offsetX: state.offsetX,
+        offsetY: state.offsetY
+    };
+
+    store.put(payload, 'current');
+}
+
+async function loadWorkspace() {
+    try {
+        const db = await getDB();
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get('current');
+        
+        req.onsuccess = () => {
+            const data = req.result;
+            if (data) {
+                state.shapes = data.shapes || [];
+                state.descriptions = data.descriptions || {};
+                state.scale = data.scale || 1;
+                state.offsetX = data.offsetX || 0;
+                state.offsetY = data.offsetY || 0;
+                
+                if (data.imgBase64) {
+                    const img = new Image();
+                    img.onload = () => {
+                        state.imageObj = img;
+                        render();
+                    };
+                    img.src = data.imgBase64;
+                } else {
+                    render();
+                }
+            }
+        };
+    } catch (e) {
+        console.warn("Could not load workspace from DB", e);
+    }
+}
+
+/**
+ * UI INITIALIZATION
+ */
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('canvas-container');
+
+function initUI() {
+    // Populate Colors
+    const colorContainer = document.getElementById('colorPicker');
+    COLORS.forEach(c => {
+        const div = document.createElement('div');
+        div.className = `color-swatch ${c.hex === state.currentColor ? 'selected' : ''}`;
+        div.style.backgroundColor = c.hex;
+        div.onclick = () => {
+            document.querySelectorAll('.color-swatch').forEach(el => el.classList.remove('selected'));
+            div.classList.add('selected');
+            state.currentColor = c.hex;
+        };
+        colorContainer.appendChild(div);
+    });
+
+    // Populate Descriptions Modal
+    const descList = document.getElementById('descList');
+    COLORS.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'desc-row';
+        row.innerHTML = `
+            <div class="color-swatch" style="background-color: ${c.hex}; flex-shrink: 0; cursor: default;"></div>
+            <input type="text" placeholder="Description for ${c.name}" data-hex="${c.hex}">
+        `;
+        descList.appendChild(row);
+    });
+
+    // Listen to description changes to auto-save
+    descList.addEventListener('input', (e) => {
+        if (e.target.tagName === 'INPUT') {
+            state.descriptions[e.target.dataset.hex] = e.target.value;
+            debounceSave();
+        }
+    });
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+}
+
+function openDescriptions() {
+    // Update inputs from state
+    document.querySelectorAll('#descList input').forEach(input => {
+        input.value = state.descriptions[input.dataset.hex] || '';
+    });
+    document.getElementById('desc-modal').classList.add('open');
+}
+
+function toggleMode() {
+    const btn = document.getElementById('btnMode');
+    if (state.mode === 'stroke') {
+        state.mode = 'fill';
+        btn.innerText = 'Filled';
+        btn.classList.remove('active');
+    } else {
+        state.mode = 'stroke';
+        btn.innerText = 'Outline';
+        btn.classList.add('active');
+    }
+}
+
+/**
+ * I/O HANDLING
+ */
+document.getElementById('fileInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) loadImageFile(file);
+});
+
+window.addEventListener('paste', (e) => {
+    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (let index in items) {
+        const item = items[index];
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+            loadImageFile(item.getAsFile());
+            break;
+        }
+    }
+});
+
+async function tryPaste() {
+    try {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const clipboardItem of clipboardItems) {
+            const imageTypes = clipboardItem.types.filter(type => type.startsWith('image/'));
+            if (imageTypes.length > 0) {
+                const blob = await clipboardItem.getType(imageTypes[0]);
+                loadImageFile(blob);
+                return;
+            }
+        }
+        alert("No image found in clipboard.");
+    } catch (err) {
+        alert("Paste permission denied or unsupported. Try long-pressing and using the system Paste.");
+    }
+}
+
+function loadImageFile(file) {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+            state.imageObj = img;
+            state.shapes = []; // clear shapes on new image
+            
+            // Auto fit to screen
+            const cw = canvas.width;
+            const ch = canvas.height;
+            const scaleX = cw / img.width;
+            const scaleY = ch / img.height;
+            state.scale = Math.min(scaleX, scaleY, 1); // Don't scale up past 1x initially
+            
+            state.offsetX = (cw - img.width * state.scale) / 2;
+            state.offsetY = (ch - img.height * state.scale) / 2;
+            
+            render();
+            debounceSave();
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+/**
+ * CANVAS RENDERING
+ */
+function resizeCanvas() {
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+    render();
+}
+
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (!state.imageObj) {
+        ctx.fillStyle = "#45475a";
+        ctx.font = "16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Load or Paste an Image to begin", canvas.width/2, canvas.height/2);
+        return;
+    }
+
+    ctx.save();
+    ctx.translate(state.offsetX, state.offsetY);
+    ctx.scale(state.scale, state.scale);
+
+    // Draw Image
+    ctx.drawImage(state.imageObj, 0, 0);
+
+    // Dynamic Line Width based on image size (approx 0.5% of max dimension, min 3px)
+    const baseLineWidth = Math.max(3, Math.max(state.imageObj.width, state.imageObj.height) * 0.005);
+
+    // Draw Shapes
+    const allShapes = [...state.shapes];
+    if (activeRect) allShapes.push(activeRect);
+
+    for (const shape of allShapes) {
+        ctx.beginPath();
+        ctx.rect(shape.x, shape.y, shape.w, shape.h);
+        
+        if (shape.type === 'fill') {
+            ctx.fillStyle = shape.color;
+            ctx.fill();
+        } else {
+            ctx.strokeStyle = shape.color;
+            ctx.lineWidth = baseLineWidth;
+            ctx.stroke();
+        }
+    }
+
+    ctx.restore();
+}
+
+/**
+ * TOUCH / STYLUS / MOUSE INTERACTION
+ */
+let pointers = new Map();
+let activeRect = null;
+let startPan = null;
+
+// Convert screen coords to image world coords
+function screenToWorld(sx, sy) {
+    return {
+        x: (sx - state.offsetX) / state.scale,
+        y: (sy - state.offsetY) / state.scale
+    };
+}
+
+function getPinchDist(p1, p2) {
+    return Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY);
+}
+function getPinchCenter(p1, p2) {
+    return {
+        x: (p1.clientX + p2.clientX) / 2,
+        y: (p1.clientY + p2.clientY) / 2
+    };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+    if (!state.imageObj) return;
+    pointers.set(e.pointerId, e);
+
+    if (pointers.size === 1) {
+        // Start drawing
+        const worldPos = screenToWorld(e.clientX, e.clientY);
+        activeRect = {
+            type: state.mode,
+            color: state.currentColor,
+            startX: worldPos.x,
+            startY: worldPos.y,
+            x: worldPos.x, y: worldPos.y, w: 0, h: 0
+        };
+    } else if (pointers.size === 2) {
+        // Cancel drawing, start panning/zooming
+        activeRect = null;
+        const pts = Array.from(pointers.values());
+        startPan = {
+            dist: getPinchDist(pts[0], pts[1]),
+            center: getPinchCenter(pts[0], pts[1]),
+            scale: state.scale,
+            offsetX: state.offsetX,
+            offsetY: state.offsetY
+        };
+    }
+    canvas.setPointerCapture(e.pointerId);
+    render();
+});
+
+canvas.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, e);
+
+    if (pointers.size === 1 && activeRect) {
+        const worldPos = screenToWorld(e.clientX, e.clientY);
+        activeRect.x = Math.min(activeRect.startX, worldPos.x);
+        activeRect.y = Math.min(activeRect.startY, worldPos.y);
+        activeRect.w = Math.abs(worldPos.x - activeRect.startX);
+        activeRect.h = Math.abs(worldPos.y - activeRect.startY);
+        render();
+    } else if (pointers.size === 2 && startPan) {
+        const pts = Array.from(pointers.values());
+        const newDist = getPinchDist(pts[0], pts[1]);
+        const newCenter = getPinchCenter(pts[0], pts[1]);
+
+        // Calculate Scale
+        const scaleDelta = newDist / startPan.dist;
+        state.scale = Math.max(0.1, Math.min(startPan.scale * scaleDelta, 10));
+
+        // Calculate Translation (pan + adjust for zoom center)
+        const scaleRatio = state.scale / startPan.scale;
+        state.offsetX = newCenter.x - (startPan.center.x - startPan.offsetX) * scaleRatio;
+        state.offsetY = newCenter.y - (startPan.center.y - startPan.offsetY) * scaleRatio;
+        
+        render();
+    }
+});
+
+function handlePointerUp(e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+
+    if (activeRect) {
+        // Only save if it has actual size
+        if (activeRect.w > 2 && activeRect.h > 2) {
+            delete activeRect.startX;
+            delete activeRect.startY;
+            state.shapes.push(activeRect);
+            debounceSave();
+        }
+        activeRect = null;
+    }
+    
+    // Reset pan state if we drop below 2 fingers
+    if (pointers.size < 2) {
+        startPan = null;
+    }
+    render();
+}
+
+canvas.addEventListener('pointerup', handlePointerUp);
+canvas.addEventListener('pointercancel', handlePointerUp);
+canvas.addEventListener('pointerout', handlePointerUp);
+
+// Desktop mouse wheel zooming
+canvas.addEventListener('wheel', (e) => {
+    if (!state.imageObj) return;
+    e.preventDefault();
+    
+    const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(0.1, Math.min(state.scale * scaleFactor, 10));
+    
+    // Zoom around cursor
+    const ratio = newScale / state.scale;
+    state.offsetX = e.clientX - (e.clientX - state.offsetX) * ratio;
+    state.offsetY = e.clientY - (e.clientY - state.offsetY) * ratio;
+    state.scale = newScale;
+    
+    render();
+    debounceSave();
+}, { passive: false });
+
+
+function undo() {
+    if (state.shapes.length > 0) {
+        state.shapes.pop();
+        render();
+        debounceSave();
+    }
+}
+
+/**
+ * EXPORT & OUTPUT
+ */
+function createExportCanvas() {
+    if (!state.imageObj) return null;
+    
+    const expCv = document.createElement('canvas');
+    expCv.width = state.imageObj.width;
+    expCv.height = state.imageObj.height;
+    const expCtx = expCv.getContext('2d');
+    
+    // Draw original image exactly 1:1
+    expCtx.drawImage(state.imageObj, 0, 0);
+    
+    const baseLineWidth = Math.max(3, Math.max(state.imageObj.width, state.imageObj.height) * 0.005);
+    
+    for (const shape of state.shapes) {
+        expCtx.beginPath();
+        expCtx.rect(shape.x, shape.y, shape.w, shape.h);
+        if (shape.type === 'fill') {
+            expCtx.fillStyle = shape.color;
+            expCtx.fill();
+        } else {
+            expCtx.strokeStyle = shape.color;
+            expCtx.lineWidth = baseLineWidth;
+            expCtx.stroke();
+        }
+    }
+    return expCv;
+}
+
+function downloadImage() {
+    const cv = createExportCanvas();
+    if (!cv) return alert("Load an image first.");
+    
+    cv.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `annotated_${Date.now()}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }, "image/png");
+}
+
+async function copyImage() {
+    const cv = createExportCanvas();
+    if (!cv) return alert("Load an image first.");
+    
+    try {
+        cv.toBlob(async blob => {
+            await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': blob })
+            ]);
+            showToast("Image copied to clipboard!");
+        }, "image/png");
+    } catch (err) {
+        alert("Clipboard API not supported for images in this browser context.");
+    }
+}
+
+function copyText(lang) {
+    if (state.shapes.length === 0) {
+        alert("No annotations drawn yet.");
+        return;
+    }
+
+    const usedColorsHex = new Set(state.shapes.map(s => s.color));
+    let text = "";
+    
+    if (lang === 'en') {
+        text += "Image is annotated with colored rectangles, which meaning depends on color. Specific meanings of each color:\n";
+    } else {
+        text += "Obraz jest oznaczony kolorowymi prostokątami, których znaczenie zależy od koloru. Konkretne znaczenia poszczególnych kolorów:\n";
+    }
+
+    let itemsAdded = 0;
+    for (const c of COLORS) {
+        if (usedColorsHex.has(c.hex)) {
+            const desc = state.descriptions[c.hex] || "";
+            if (desc.trim() !== "") {
+                const colorName = lang === 'en' ? c.name : c.namePl;
+                text += `- ${colorName} - ${desc}\n`;
+                itemsAdded++;
+            }
+        }
+    }
+
+    if (itemsAdded === 0) {
+        alert("No descriptions provided for the used colors. Edit descriptions using the 'Desc' button.");
+        return;
+    }
+
+    // Try standard clipboard API first
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => showToast("Text copied!"));
+    } else {
+        // Fallback for older browsers / iframe contexts
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            showToast("Text copied!");
+        } catch (err) {
+            alert("Failed to copy text. Check console.");
+        }
+        document.body.removeChild(textArea);
+    }
+}
+
+function showToast(msg) {
+    const toast = document.createElement('div');
+    toast.textContent = msg;
+    toast.style.cssText = "position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#a6e3a1; color:#111; padding:8px 16px; border-radius:8px; font-weight:bold; z-index:1000; box-shadow: 0 4px 6px rgba(0,0,0,0.3);";
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+}
+
+// Debouncer for saving state to prevent lag while drawing
+let saveTimeout;
+function debounceSave() {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(saveWorkspace, 500);
+}
+
+// Init
+initUI();
+loadWorkspace();
+
+</script>
+</body>
+</html>
