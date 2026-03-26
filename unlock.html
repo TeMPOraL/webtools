@@ -148,6 +148,9 @@
         .status.success { color: var(--success); }
         .status.processing { color: var(--primary); }
     </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.4.26/dist/zip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@cantoo/pdf-lib@3.0.1/dist/pdf-lib.min.js"></script>
 </head>
 <body>
 
@@ -170,10 +173,14 @@
     <div class="status" id="status"></div>
 </div>
 
-<script type="module">
-    // Using esm.sh for reliable module loading without MIME type errors
-    import * as zip from 'https://esm.sh/@zip.js/zip.js@2.4.26';
-    import { PDFDocument } from 'https://esm.sh/@cantoo/pdf-lib@3.0.1';
+<script>
+    // Grab the global instances loaded by the script tags
+    const { PDFDocument } = window.PDFLib;
+    
+    // Disable Web Workers to prevent any potential cross-origin hiccups on static hosts
+    zip.configure({
+        useWebWorkers: false
+    });
 
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
@@ -184,7 +191,6 @@
 
     let currentFile = null;
 
-    // --- UI Event Listeners ---
     dropZone.addEventListener('click', () => fileInput.click());
     
     dropZone.addEventListener('dragover', (e) => {
@@ -211,7 +217,6 @@
     passwordInput.addEventListener('input', updateButtonState);
     actionBtn.addEventListener('click', processFile);
 
-    // --- Core Logic ---
     function handleFileSelect(file) {
         const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
         const isZip = file.name.toLowerCase().endsWith('.zip') || file.type.includes('zip');
@@ -258,7 +263,7 @@
 
             downloadFile(resultBlob, `unlocked_${currentFile.name}`);
             setStatus('Success! File downloaded.', 'success');
-            passwordInput.value = ''; // Clear password for security
+            passwordInput.value = ''; 
         } catch (error) {
             console.error(error);
             setStatus(`Error: ${error.message || 'Processing failed'}`, 'error');
