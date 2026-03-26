@@ -150,7 +150,7 @@
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.4.26/dist/zip.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@cantoo/pdf-lib@3.0.1/dist/pdf-lib.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@cantoo/pdf-lib@2.6.3/dist/pdf-lib.min.js"></script>
 </head>
 <body>
 
@@ -177,7 +177,7 @@
     // Grab the global instances loaded by the script tags
     const { PDFDocument } = window.PDFLib;
     
-    // Disable Web Workers to prevent any potential cross-origin hiccups on static hosts
+    // Disable Web Workers to prevent cross-origin hiccups on static hosts
     zip.configure({
         useWebWorkers: false
     });
