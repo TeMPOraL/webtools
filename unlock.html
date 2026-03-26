@@ -171,9 +171,9 @@
 </div>
 
 <script type="module">
-    // Using modern ESM imports directly from CDN
-    import * as zip from 'https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.4.26/+esm';
-    import { PDFDocument } from 'https://cdn.jsdelivr.net/npm/@cantoo/pdf-lib@3.0.1/+esm';
+    // Using esm.sh for reliable module loading without MIME type errors
+    import * as zip from 'https://esm.sh/@zip.js/zip.js@2.4.26';
+    import { PDFDocument } from 'https://esm.sh/@cantoo/pdf-lib@3.0.1';
 
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
@@ -272,13 +272,11 @@
         let pdfDoc;
         
         try {
-            // @cantoo/pdf-lib handles the decryption under the hood when password is provided
             pdfDoc = await PDFDocument.load(arrayBuffer, { password, ignoreEncryption: false });
         } catch (e) {
             throw new Error('Incorrect password or unable to read PDF structure.');
         }
 
-        // Saving natively writes it out unencrypted
         const savedBytes = await pdfDoc.save();
         return new Blob([savedBytes], { type: 'application/pdf' });
     }
@@ -303,9 +301,7 @@
                 await zipWriter.add(entry.filename, null, { directory: true });
             } else {
                 try {
-                    // Extract the encrypted data natively using the provided password
                     const unencryptedBlob = await entry.getData(new zip.BlobWriter());
-                    // Repackage it into the new ZIP without encryption
                     await zipWriter.add(entry.filename, new zip.BlobReader(unencryptedBlob));
                 } catch (e) {
                     await zipReader.close();
