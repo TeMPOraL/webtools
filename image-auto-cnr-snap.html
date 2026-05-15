@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Photo Scan Deskewer Pro V13</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #1e1e1e; color: #fff;
+            margin: 0; padding: 15px;
+            height: 100vh; height: 100dvh; box-sizing: border-box;
+            display: flex; flex-direction: column; align-items: center;
+            overflow: hidden; touch-action: none;
+        }
+        .toolbar {
+            background: #2d2d2d; padding: 10px 15px; border-radius: 8px;
+            margin-bottom: 15px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3); width: 100%; box-sizing: border-box;
+            flex-shrink: 0; justify-content: center;
+        }
+        .controls {
+            display: flex; gap: 15px; align-items: center;
+            border-left: 2px solid #444; border-right: 2px solid #444; padding: 0 15px;
+        }
+        .slider-group { display: flex; flex-direction: column; font-size: 0.8em; color: #bbb; min-width: 110px;}
+        .slider-group span { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        
+        button, input[type="file"]::file-selector-button {
+            background: #0078d4; color: white; border: none;
+            padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
+        }
+        button:hover, input[type="file"]::file-selector-button:hover { background: #005a9e; }
+        button:disabled { background: #555; cursor: not-allowed; opacity: 0.7; }
+        
+        .transform-group { display: flex; gap: 5px; }
+        .transform-group button { background: #5c2d91; padding: 8px 12px; font-size: 1.1em; }
+        .transform-group button:hover { background: #4b2377; }
+        
+        #btn-snap { background: #107c10; width: 110px; }
+        #btn-snap.off { background: #c50f1f; }
+        #btn-shrink { background: #d97706; }
+        #btn-shrink:hover { background: #b45309; }
+        
+        .debug-container { display: flex; gap: 10px; align-items: center; }
+        .debug-box { display: flex; flex-direction: column; align-items: center; }
+        .debug-box p { margin: 0 0 2px 0; font-size: 0.7em; color: #aaa; }
+        .debug-canvas { height: 40px; border: 1px solid #444; background: #000; cursor: crosshair;}
+        
+        #workspace {
+            flex-grow: 1; width: 100%; display: flex; justify-content: center; align-items: center;
+            position: relative; overflow: hidden;
+        }
+        
+        #instructions {
+            max-width: 650px; background: #2d2d2d; padding: 25px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #444; line-height: 1.5;
+            font-size: 0.95em; overflow-y: auto; max-height: 100%;
+        }
+        #instructions h2 { margin-top: 0; color: #0078d4; font-size: 1.3em;}
+        #instructions ol { padding-left: 20px; margin-bottom: 0; }
+        #instructions li { margin-bottom: 10px; }
+        #instructions li:last-child { margin-bottom: 0; }
+        
+        #canvas-wrapper {
+            display: none; width: 100%; height: 100%; 
+            border: 2px dashed #555; background: #000; position: relative;
+            justify-content: center; align-items: center;
+        }
+        canvas { display: block; max-width: 100%; max-height: 100%; object-fit: contain; touch-action: none; }
+        
+        #status { font-size: 0.85em; color: #aaa; min-width: 120px; text-align: center;}
+        
+        @media (max-width: 768px) {
+            .controls { border: none; padding: 0; width: 100%; justify-content: center; margin-top: 5px;}
+            .toolbar { gap: 8px; padding: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <span id="status">Wczytywanie OpenCV.js...</span>
+        <input type="file" id="upload" accept="image/*" disabled>
+        
+        <div class="transform-group">
+            <button id="btn-rot-l" disabled title="Obróć w lewo">↶</button>
+            <button id="btn-rot-r" disabled title="Obróć w prawo">↷</button>
+            <button id="btn-flip-h" disabled title="Odbij w poziomie">↔</button>
+            <button id="btn-flip-v" disabled title="Odbij w pionie">↕</button>
+        </div>
+        
+        <div class="controls">
+            <div class="slider-group">
+                <span><label>Czułość krawędzi</label><output id="out-canny">40</output></span>
+                <input type="range" id="cv-canny" min="10" max="150" value="40" disabled>
+            </div>
+            <div class="slider-group">
+                <span><label>Min. dł. linii (%)</label><output id="out-length">20</output></span>
+                <input type="range" id="cv-length" min="5" max="60" value="20" disabled>
+            </div>
+        </div>
+
+        <button id="btn-snap" disabled>Snapping: ON</button>
+        <button id="btn-shrink" disabled title="Zmniejsz obszar o 1px z każdej strony">Shrink 1px</button>
+        <button id="btn-extract" disabled>Crop & Download</button>
+
+        <div class="debug-container">
+            <div class="debug-box"><p>Canny</p><canvas id="debug-edges" class="debug-canvas"></canvas></div>
+            <div class="debug-box"><p>Rails</p><canvas id="debug-lines" class="debug-canvas"></canvas></div>
+        </div>
+    </div>
+
+    <div id="workspace">
+        <div id="instructions">
+            <h2>Jak korzystać z narzędzia</h2>
+            <ol>
+                <li><strong>Wgraj skan:</strong> Użyj przycisku, aby załadować zeskanowane zdjęcie.</li>
+                <li><strong>Obróć i odbij (Opcjonalnie):</strong> Jeśli skan jest w złej orientacji, użyj fioletowych przycisków (↶ ↷ ↔ ↕), aby go odpowiednio ustawić (operacja w 100% bezstratna).</li>
+                <li><strong>Ustaw zgrubne ramki:</strong> Złap za krawędź niebieskiego prostokąta i przeciągnij ją. Krawędź automatycznie "przyklei się" do wykrytych prostych linii.</li>
+                <li><strong>Dostosuj wykrywanie (Opcjonalnie):</strong> Jeśli linie są słabo wykrywane, przesuń suwaki "Czułość" lub "Min. dł. linii".</li>
+                <li><strong>Precyzyjne poprawki:</strong> Kliknij "Snapping: ON", aby wyłączyć przyciąganie (lub użyj klawisza <code>Shift</code> na PC). Teraz możesz płynnie dopasować krawędzie do krzywizn zdjęcia.</li>
+                <li><strong>Odetnij margines:</strong> Kliknij "Shrink 1px" kilka razy, aby błyskawicznie ścisnąć ramkę i pozbyć się milimetrowych marginesów ze skanera bez psucia kątów.</li>
+                <li><strong>Zapisz:</strong> Kliknij "Crop & Download", aby pobrać gotowe zdjęcie.</li>
+            </ol>
+        </div>
+
+        <div id="canvas-wrapper">
+            <canvas id="canvas"></canvas>
+        </div>
+    </div>
+
+    <canvas id="hidden-canvas" style="display:none;"></canvas>
+
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/piexifjs/1.0.6/piexif.min.js"></script>
+
+    <script>
+        let cvReady = false;
+        let imgElement = new Image();
+        let originalMat = null, displayMat = null;
+        let scaleRatio = 1;
+        
+        let originalFileName = "scan";
+        let savedExifData = null;
+        
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const hiddenCanvas = document.getElementById('hidden-canvas');
+        const canvasWrapper = document.getElementById('canvas-wrapper');
+        const instructions = document.getElementById('instructions');
+        
+        let points = [];
+        let magneticRails = [];
+        let globalSnapEnabled = true;
+        
+        let draggingPoint = -1, draggingEdge = -1;
+        let dragOffsetX = 0, dragOffsetY = 0;
+        let dragStartPoints = [];
+        let isSnapped = false;
+
+        function onOpenCvReady() {
+            cvReady = true;
+            document.getElementById('status').innerText = "Gotowe. Wgraj skan.";
+            document.getElementById('upload').disabled = false;
+        }
+
+        document.getElementById('upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const lastDot = file.name.lastIndexOf('.');
+            originalFileName = lastDot === -1 ? file.name : file.name.substring(0, lastDot);
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const dataURL = event.target.result;
+                savedExifData = null;
+                if (dataURL.startsWith("data:image/jpeg")) {
+                    try { 
+                        let exifObj = piexif.load(dataURL); 
+                        if (exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Orientation]) {
+                            exifObj["0th"][piexif.ImageIFD.Orientation] = 1;
+                        }
+                        savedExifData = piexif.dump(exifObj); 
+                    } catch(e) { console.warn("EXIF processing failed."); }
+                }
+                imgElement.onload = () => { processImageLoad(); }
+                imgElement.src = dataURL;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function processImageLoad() {
+            instructions.style.display = 'none';
+            canvasWrapper.style.display = 'flex';
+
+            if (originalMat) { originalMat.delete(); }
+            originalMat = cv.imread(imgElement);
+            
+            setupWorkspaceFromOriginalMat();
+            
+            const btnIds = ['cv-canny', 'cv-length', 'btn-extract', 'btn-snap', 'btn-shrink', 
+                            'btn-rot-l', 'btn-rot-r', 'btn-flip-h', 'btn-flip-v'];
+            btnIds.forEach(id => document.getElementById(id).disabled = false);
+        }
+
+        function setupWorkspaceFromOriginalMat() {
+            if (displayMat) { displayMat.delete(); }
+            displayMat = new cv.Mat();
+            
+            const maxWidth = canvasWrapper.clientWidth - 4;
+            const maxHeight = canvasWrapper.clientHeight - 4;
+            scaleRatio = Math.min(maxWidth / originalMat.cols, maxHeight / originalMat.rows, 1);
+            
+            canvas.width = originalMat.cols * scaleRatio;
+            canvas.height = originalMat.rows * scaleRatio;
+            
+            cv.resize(originalMat, displayMat, new cv.Size(canvas.width, canvas.height));
+            
+            const w = canvas.width, h = canvas.height;
+            const ix = w * 0.15, iy = h * 0.15;
+            points = [{x: ix, y: iy}, {x: w-ix, y: iy}, {x: w-ix, y: h-iy}, {x: ix, y: h-iy}];
+
+            analyzeRails();
+        }
+
+        function transformOriginalImage(operation, code) {
+            if (!originalMat) return;
+            let transformedMat = new cv.Mat();
+            if (operation === 'rotate') {
+                cv.rotate(originalMat, transformedMat, code);
+            } else if (operation === 'flip') {
+                cv.flip(originalMat, transformedMat, code);
+            }
+            originalMat.delete();
+            originalMat = transformedMat;
+            setupWorkspaceFromOriginalMat();
+        }
+
+        document.getElementById('btn-rot-l').addEventListener('click', () => transformOriginalImage('rotate', cv.ROTATE_90_COUNTERCLOCKWISE));
+        document.getElementById('btn-rot-r').addEventListener('click', () => transformOriginalImage('rotate', cv.ROTATE_90_CLOCKWISE));
+        document.getElementById('btn-flip-h').addEventListener('click', () => transformOriginalImage('flip', 1));
+        document.getElementById('btn-flip-v').addEventListener('click', () => transformOriginalImage('flip', 0));
+
+        document.getElementById('btn-snap').addEventListener('click', (e) => {
+            globalSnapEnabled = !globalSnapEnabled;
+            e.target.innerText = globalSnapEnabled ? "Snapping: ON" : "Snapping: OFF";
+            e.target.className = globalSnapEnabled ? "" : "off";
+        });
+
+        document.getElementById('btn-shrink').addEventListener('click', () => {
+            if (points.length !== 4) return;
+            const d = 1; 
+            let newLines = [];
+            
+            for (let i = 0; i < 4; i++) {
+                let A = points[i];
+                let B = points[(i + 1) % 4];
+                let dx = B.x - A.x;
+                let dy = B.y - A.y;
+                let len = Math.hypot(dx, dy);
+                
+                let nx = -dy / len;
+                let ny = dx / len;
+                
+                newLines.push({
+                    p1: {x: A.x + d * nx, y: A.y + d * ny},
+                    p2: {x: B.x + d * nx, y: B.y + d * ny}
+                });
+            }
+            
+            let newPoints = [];
+            for (let i = 0; i < 4; i++) {
+                let linePrev = newLines[(i + 3) % 4];
+                let lineCurr = newLines[i];
+                let inter = lineIntersection(linePrev.p1, linePrev.p2, lineCurr.p1, lineCurr.p2);
+                if (inter) newPoints.push(inter);
+            }
+            
+            if (newPoints.length === 4) {
+                points = newPoints;
+                draw();
+            }
+        });
+
+        ['cv-canny', 'cv-length'].forEach(id => {
+            document.getElementById(id).addEventListener('input', (e) => {
+                document.getElementById('out-' + id.split('-')[1]).innerText = e.target.value;
+                analyzeRails();
+            });
+        });
+
+        function analyzeRails() {
+            if (!displayMat) return;
+            
+            let gray = new cv.Mat(), blurred = new cv.Mat(), edges = new cv.Mat();
+            magneticRails = [];
+
+            let cannyVal = parseInt(document.getElementById('cv-canny').value);
+            let minLineLength = canvas.width * (parseInt(document.getElementById('cv-length').value) / 100);
+
+            cv.cvtColor(displayMat, gray, cv.COLOR_RGBA2GRAY, 0);
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            cv.Canny(blurred, edges, cannyVal, cannyVal * 2.5, 3);
+            
+            let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+            cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, kernel);
+            
+            let dEdges = new cv.Mat();
+            cv.resize(edges, dEdges, new cv.Size(0,0), 50/edges.rows, 50/edges.rows);
+            cv.imshow('debug-edges', dEdges);
+
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let colorLines = new cv.Mat();
+            cv.cvtColor(edges, colorLines, cv.COLOR_GRAY2RGBA);
+
+            for (let i = 0; i < contours.size(); ++i) {
+                let cnt = contours.get(i);
+                let rect = cv.boundingRect(cnt);
+                if (Math.max(rect.width, rect.height) < minLineLength) continue;
+
+                let approx = new cv.Mat();
+                cv.approxPolyDP(cnt, approx, 5, true);
+
+                let rows = approx.rows;
+                for (let j = 0; j < rows; ++j) {
+                    let p1x = approx.data32S[j * 2];
+                    let p1y = approx.data32S[j * 2 + 1];
+                    let p2x = approx.data32S[((j + 1) % rows) * 2];
+                    let p2y = approx.data32S[((j + 1) % rows) * 2 + 1];
+
+                    let length = Math.hypot(p2x - p1x, p2y - p1y);
+                    if (length >= minLineLength) {
+                        let angle = Math.atan2(p2y - p1y, p2x - p1x);
+                        magneticRails.push({x1: p1x, y1: p1y, x2: p2x, y2: p2y, angle: angle});
+                        cv.line(colorLines, new cv.Point(p1x, p1y), new cv.Point(p2x, p2y), new cv.Scalar(255, 0, 0, 255), 2);
+                    }
+                }
+                approx.delete();
+            }
+
+            let dLines = new cv.Mat();
+            cv.resize(colorLines, dLines, new cv.Size(0,0), 50/colorLines.rows, 50/colorLines.rows);
+            cv.imshow('debug-lines', dLines);
+
+            document.getElementById('status').innerText = `Wykryto ${magneticRails.length} linii.`;
+
+            gray.delete(); blurred.delete(); edges.delete(); kernel.delete();
+            contours.delete(); hierarchy.delete(); colorLines.delete(); dEdges.delete(); dLines.delete();
+            draw();
+        }
+
+        function lineIntersection(A, B, C, D) {
+            let a1 = B.y - A.y, b1 = A.x - B.x, c1 = a1 * A.x + b1 * A.y;
+            let a2 = D.y - C.y, b2 = C.x - D.x, c2 = a2 * C.x + b2 * C.y;
+            let det = a1 * b2 - a2 * b1;
+            if (det === 0) return null; 
+            return { x: (b2 * c1 - b1 * c2) / det, y: (a1 * c2 - a2 * c1) / det };
+        }
+
+        function findBestRail(rawA, rawB) {
+            let edgeAngle = Math.atan2(rawB.y - rawA.y, rawB.x - rawA.x);
+            let cx = (rawA.x + rawB.x) / 2, cy = (rawA.y + rawB.y) / 2;
+
+            for (let rail of magneticRails) {
+                let diff = Math.abs(rail.angle - edgeAngle) % Math.PI;
+                diff = Math.min(diff, Math.PI - diff);
+                
+                if (diff < 0.15) { 
+                    let d = Math.abs((rail.y2 - rail.y1)*cx - (rail.x2 - rail.x1)*cy + rail.x2*rail.y1 - rail.y2*rail.x1) / 
+                            Math.hypot(rail.y2 - rail.y1, rail.x2 - rail.x1);
+                    if (d < 25) return rail; 
+                }
+            }
+            return null;
+        }
+
+        function distToSegment(p, v, w) {
+            const l2 = (v.x - w.x)**2 + (v.y - w.y)**2;
+            if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+            let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+        }
+
+        function draw() {
+            if (!displayMat) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)'; ctx.lineWidth = 1.5;
+            magneticRails.forEach(r => {
+                ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2); ctx.stroke();
+            });
+
+            ctx.fillStyle = 'rgba(0, 120, 212, 0.2)';
+            ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+            for(let i=1; i<4; i++) ctx.lineTo(points[i].x, points[i].y);
+            ctx.closePath(); ctx.fill();
+
+            for (let i=0; i<4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(points[i].x, points[i].y);
+                ctx.lineTo(points[(i+1)%4].x, points[(i+1)%4].y);
+                if (isSnapped && draggingEdge === i) {
+                    ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 4;
+                } else {
+                    ctx.strokeStyle = '#0078d4'; ctx.lineWidth = 2;
+                }
+                ctx.stroke();
+            }
+
+            ctx.fillStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeStyle = '#0078d4';
+            points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); });
+        }
+
+        // --- UNIFIED POINTER INTERACTION (Mouse + Touch) ---
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            let cx = e.clientX, cy = e.clientY;
+            if (e.touches && e.touches.length > 0) {
+                cx = e.touches[0].clientX;
+                cy = e.touches[0].clientY;
+            }
+            return { x: cx - rect.left, y: cy - rect.top };
+        }
+
+        function handleStart(e) {
+            if (e.cancelable && e.type.startsWith('touch')) e.preventDefault();
+            const pos = getPos(e);
+            
+            for (let i = 0; i < 4; i++) {
+                if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 20) { 
+                    draggingPoint = i; return; 
+                }
+            }
+            for (let i = 0; i < 4; i++) {
+                if (distToSegment(pos, points[i], points[(i + 1) % 4]) < 20) {
+                    draggingEdge = i; 
+                    dragOffsetX = pos.x; dragOffsetY = pos.y; 
+                    dragStartPoints = JSON.parse(JSON.stringify(points));
+                    return;
+                }
+            }
+        }
+
+        function handleMove(e) {
+            if (e.cancelable && e.type.startsWith('touch')) e.preventDefault();
+            const pos = getPos(e);
+            
+            if (draggingPoint !== -1) { 
+                points[draggingPoint] = pos; 
+                isSnapped = false;
+                draw(); 
+            } else if (draggingEdge !== -1) {
+                let i = draggingEdge;
+                let dx = pos.x - dragOffsetX; 
+                let dy = pos.y - dragOffsetY;
+                
+                let pPrev = dragStartPoints[(i + 3) % 4];
+                let p1 = dragStartPoints[i];
+                let p2 = dragStartPoints[(i + 1) % 4];
+                let pNext = dragStartPoints[(i + 2) % 4];
+
+                let targetLineP1 = {x: p1.x + dx, y: p1.y + dy};
+                let targetLineP2 = {x: p2.x + dx, y: p2.y + dy};
+                
+                let effectiveSnap = globalSnapEnabled !== !!e.shiftKey;
+                isSnapped = false;
+
+                if (effectiveSnap) {
+                    let snapRail = findBestRail(targetLineP1, targetLineP2);
+                    if (snapRail) {
+                        targetLineP1 = {x: snapRail.x1, y: snapRail.y1};
+                        targetLineP2 = {x: snapRail.x2, y: snapRail.y2};
+                        isSnapped = true;
+                    }
+                }
+
+                let newP1 = lineIntersection(pPrev, p1, targetLineP1, targetLineP2);
+                let newP2 = lineIntersection(p2, pNext, targetLineP1, targetLineP2);
+
+                if (newP1 && newP2) {
+                    points[i] = newP1; points[(i + 1) % 4] = newP2;
+                }
+                draw();
+            } else {
+                let cursor = 'crosshair';
+                for (let i=0; i<4; i++) {
+                    if (distToSegment(pos, points[i], points[(i+1)%4]) < 15) cursor = 'move';
+                    if (Math.hypot(pos.x - points[i].x, pos.y - points[i].y) < 20) cursor = 'pointer';
+                }
+                canvas.style.cursor = cursor;
+            }
+        }
+
+        function handleEnd() { 
+            draggingPoint = -1; draggingEdge = -1; isSnapped = false; draw(); 
+        }
+
+        // Attach Mouse Events
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+
+        // Attach Touch Events (passive: false is critical to allow preventDefault)
+        canvas.addEventListener('touchstart', handleStart, {passive: false});
+        canvas.addEventListener('touchmove', handleMove, {passive: false});
+        window.addEventListener('touchend', handleEnd);
+        window.addEventListener('touchcancel', handleEnd);
+
+        document.getElementById('btn-extract').addEventListener('click', () => {
+            if (!originalMat) return;
+            const srcCoords = [];
+            points.forEach(p => { srcCoords.push(p.x / scaleRatio, p.y / scaleRatio); });
+
+            const w1 = Math.hypot(srcCoords[4] - srcCoords[6], srcCoords[5] - srcCoords[7]); 
+            const w2 = Math.hypot(srcCoords[0] - srcCoords[2], srcCoords[1] - srcCoords[3]); 
+            const h1 = Math.hypot(srcCoords[2] - srcCoords[4], srcCoords[3] - srcCoords[5]); 
+            const h2 = Math.hypot(srcCoords[0] - srcCoords[6], srcCoords[1] - srcCoords[7]); 
+            const maxWidth = Math.max(w1, w2); const maxHeight = Math.max(h1, h2);
+
+            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, srcCoords);
+            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, maxWidth, 0, maxWidth, maxHeight, 0, maxHeight]);
+            let M = cv.getPerspectiveTransform(srcTri, dstTri);
+            let warpedDst = new cv.Mat();
+            
+            cv.warpPerspective(originalMat, warpedDst, M, new cv.Size(maxWidth, maxHeight), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+            cv.imshow('hidden-canvas', warpedDst);
+            
+            let dataURL = hiddenCanvas.toDataURL('image/jpeg', 0.95);
+            if (savedExifData) { try { dataURL = piexif.insert(savedExifData, dataURL); } catch(e){} }
+            
+            const a = document.createElement('a');
+            a.href = dataURL; a.download = `${originalFileName}-fixed.jpg`; a.click();
+            srcTri.delete(); dstTri.delete(); M.delete(); warpedDst.delete();
+        });
+    </script>
+</body>
+</html>

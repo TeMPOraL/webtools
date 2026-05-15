@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<!--
+  LEGACY TOOL — ported verbatim from the standalone qr-code-generator project.
+  Exempt from this repo's single-file / CDN-pinning conventions: it keeps its
+  original multi-file layout, with all assets vendored under qr/css/ and
+  qr/js/ (qr/css/styles.css, qr/js/qrious.js, qr/js/app.js), and
+  vendored, inlined dependencies. Do not "modernize" it to match the other
+  tools. Polish UI is intentional. See CLAUDE.md > Legacy tools.
+-->
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generator kodów QR</title>
+    <link rel="stylesheet" href="qr/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Generator kodów QR</h1>
+
+        <div class="input-section">
+            <label for="content">Zawartość (URL, tekst, itp.):</label>
+            <textarea id="content" placeholder="Wprowadź treść dla kodu QR"></textarea>
+
+            <details class="advanced-section">
+                <summary>Opcje zaawansowane</summary>
+                <div class="advanced-content">
+                    <label for="errorCorrection">Poziom korekcji błędów:</label>
+                    <select id="errorCorrection">
+                        <option value="L">Niski (7%)</option>
+                        <option value="M" selected>Średni (15%)</option>
+                        <option value="Q">Kwartyl (25%)</option>
+                        <option value="H">Wysoki (30%)</option>
+                    </select>
+
+                    <div class="color-section">
+                        <label>Kolory:</label>
+                        <div class="color-inputs">
+                            <div class="color-input-group">
+                                <label for="foregroundColor">Kolor QR:</label>
+                                <input type="color" id="foregroundColor" value="#000000">
+                            </div>
+                            <div class="color-input-group">
+                                <label for="backgroundColor">Tło:</label>
+                                <input type="color" id="backgroundColor" value="#FFFFFF">
+                            </div>
+                        </div>
+                        <div class="transparency-option">
+                            <label>
+                                <input type="checkbox" id="transparentBackground"> Przezroczyste tło
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="style-section">
+                        <label for="moduleStyle">Styl modułów:</label>
+                        <select id="moduleStyle">
+                            <option value="square" selected>Kwadratowe</option>
+                            <option value="dots">Kropki</option>
+                            <option value="rounded">Zaokrąglone</option>
+                        </select>
+                    </div>
+
+                    <div class="logo-section">
+                        <label for="logoUpload">Logo (opcjonalne):</label>
+                        <input type="file" id="logoUpload" accept="image/*">
+                        <div id="logoPreview" class="logo-preview"></div>
+                        <button type="button" id="removeLogo" class="remove-logo-btn" style="display: none;">Usuń logo</button>
+                        <p class="logo-info" id="logoInfo" style="display: none;">
+                            <small>⚠️ Poziom korekcji błędów został ustawiony na Wysoki (30%) dla zapewnienia czytelności kodu QR z logo.</small>
+                        </p>
+                    </div>
+                </div>
+            </details>
+        </div>
+
+        <div class="output-section">
+            <div id="qrcode-container">
+                <canvas id="qrcode"></canvas>
+            </div>
+            <a id="download" class="download-btn" download="qrcode.png">Pobierz kod QR</a>
+        </div>
+    </div>
+
+    <script src="qr/js/qrious.js"></script>
+    <script src="qr/js/app.js"></script>
+</body>
+</html>
