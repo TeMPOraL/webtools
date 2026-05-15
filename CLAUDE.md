@@ -27,9 +27,14 @@ automated tests. State explicitly when a change could not be browser-verified.
 ## Deployment and previews
 
 The site is hosted on GitHub Pages at `https://temporal.github.io/webtools/`.
-`.github/workflows/pages.yml` publishes the Pages site; it requires the
-repo's Pages **Source** to be set to **"GitHub Actions"** (Settings → Pages),
-not "Deploy from a branch".
+`.github/workflows/pages.yml` builds the site and force-pushes it to a
+generated **`gh-pages`** branch. The repo's Pages **Source** must be
+**"Deploy from a branch" → branch `gh-pages` / `(root)`** (Settings →
+Pages) — *not* "GitHub Actions". (The official `deploy-pages` action
+deploys through the `github-pages` environment, which is default-branch
+only and so cannot publish from PR runs; a token push to `gh-pages` has
+no such gate.) `gh-pages` is a build artifact: it is force-pushed as a
+single commit every run — never edit it by hand or treat it as source.
 
 - `main` is published at the site **root**.
 - The **most recently pushed open PR** (same-repo branches only; not forks)
