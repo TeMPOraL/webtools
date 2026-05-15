@@ -28,7 +28,30 @@
         }
 
         .ui-panel h2 { margin-top: 0; }
-        
+
+        .mode-toggle {
+            display: flex;
+            gap: 0;
+            margin-bottom: 16px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            overflow: hidden;
+            width: fit-content;
+        }
+        .mode-toggle label {
+            margin: 0;
+            padding: 8px 18px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #555;
+            background: #eee;
+            cursor: pointer;
+            user-select: none;
+        }
+        .mode-toggle input { display: none; }
+        .mode-toggle input:checked + span { color: #fff; }
+        .mode-toggle label:has(input:checked) { background: #007bff; color: #fff; }
+
         .editor-toolbar {
             display: flex;
             gap: 10px;
@@ -78,11 +101,49 @@
             color: #555;
         }
 
-        input {
+        input, select {
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+
+        .drop-zone {
+            border: 2px dashed #bbb;
+            border-radius: 6px;
+            padding: 18px;
+            text-align: center;
+            color: #777;
+            font-size: 14px;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+        .drop-zone.dragover { border-color: #007bff; background: #f0f7ff; color: #007bff; }
+
+        .img-info {
+            font-size: 13px;
+            color: #444;
+            background: #f7f7f7;
+            border: 1px solid #e2e2e2;
+            border-radius: 4px;
+            padding: 10px 12px;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+        .img-info b { color: #007bff; }
+        .img-info .preview {
+            max-height: 70px;
+            max-width: 140px;
+            vertical-align: middle;
+            margin-right: 12px;
+            border: 1px solid #ccc;
+            background:
+                linear-gradient(45deg, #ddd 25%, transparent 25%) 0 0/16px 16px,
+                linear-gradient(-45deg, #ddd 25%, transparent 25%) 0 8px/16px 16px,
+                linear-gradient(45deg, transparent 75%, #ddd 75%) 8px -8px/16px 16px,
+                linear-gradient(-45deg, transparent 75%, #ddd 75%) -8px 0/16px 16px,
+                #fff;
+        }
+        .warn { color: #c0392b; font-weight: bold; }
 
         .btn-primary {
             background: #007bff;
@@ -98,8 +159,10 @@
 
         .btn-primary:hover { background: #0056b3; }
 
+        .hidden { display: none !important; }
+
         /* --- PRINT STYLES --- */
-        
+
         /* This forces the browser to remove headers/footers and margins */
         @page {
             margin: 0;
@@ -118,24 +181,42 @@
             height: var(--page-height);
             display: grid;
             box-sizing: border-box;
-            
+
             /* Visual separation on screen */
             margin-bottom: 20px;
             box-shadow: 0 0 10px rgba(0,0,0,0.2);
             position: relative;
+
+            /* Don't let the browser "save ink" on label graphics */
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
         }
 
         .label-cell {
             display: flex;
             flex-direction: column;
-            justify-content: center; 
-            align-items: flex-start; 
+            justify-content: center;
+            align-items: flex-start;
             overflow: hidden;
             box-sizing: border-box;
             word-wrap: break-word;
             /* Padding is set via JS now */
         }
-        
+
+        /* Image mode: one copy of the design, force-fit to the cell */
+        .label-cell.image-cell {
+            display: block;
+            justify-content: initial;
+            align-items: initial;
+        }
+        .label-img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
         .show-outlines .label-cell {
             outline: 1px dashed #e0e0e0; /* Use outline so it doesn't add width */
         }
@@ -169,44 +250,78 @@
 
     <div class="ui-panel no-print">
         <h2>Label Debullshittifier</h2>
-        <p>Paste data. 1 Row = 1 Label.</p>
-        
-        <div class="editor-toolbar">
-            <button class="btn-sm" onclick="insertTab()">⇥ Insert Tab</button>
-            <span style="font-size: 12px; color: #666;">(Use to separate columns)</span>
+
+        <div class="mode-toggle">
+            <label><input type="radio" name="mode" value="text" checked onchange="updateMode()"><span>Text data</span></label>
+            <label><input type="radio" name="mode" value="image" onchange="updateMode()"><span>Image tile</span></label>
         </div>
-        
-        <textarea id="inputData" placeholder="Name&#9;Address&#9;City&#10;John Doe&#9;123 Fake St&#9;New York..."></textarea>
+
+        <!-- TEXT MODE -->
+        <div id="textControls">
+            <p>Paste data. 1 Row = 1 Label.</p>
+
+            <div class="editor-toolbar">
+                <button class="btn-sm" onclick="insertTab()">⇥ Insert Tab</button>
+                <span style="font-size: 12px; color: #666;">(Use to separate columns)</span>
+            </div>
+
+            <textarea id="inputData" placeholder="Name&#9;Address&#9;City&#10;John Doe&#9;123 Fake St&#9;New York..."></textarea>
+        </div>
+
+        <!-- IMAGE MODE -->
+        <div id="imageControls" class="hidden">
+            <p>Design one label as a high-res image (PNG/JPG) at the cell's shape.
+               It gets force-fit into <b>every</b> cell of the grid — no scaling, no margins, no bullshit.</p>
+
+            <div class="drop-zone" id="dropZone">
+                <b>Click, drop, or paste</b> an image here
+                <input type="file" id="imgFile" accept="image/*" class="hidden" onchange="handleFiles(this.files)">
+            </div>
+
+            <div id="imgInfo" class="img-info hidden"></div>
+        </div>
 
         <div class="controls">
             <div class="control-group">
                 <label>Columns (Grid)</label>
-                <input type="number" id="cols" value="3">
+                <input type="number" id="cols" value="3" oninput="updateCellInfo()">
             </div>
             <div class="control-group">
                 <label>Rows (Grid)</label>
-                <input type="number" id="rows" value="8">
+                <input type="number" id="rows" value="8" oninput="updateCellInfo()">
             </div>
-            
+
             <div class="control-group">
                 <label>Sheet Padding Y (mm)</label>
-                <input type="number" id="padY" value="0">
+                <input type="number" id="padY" value="0" oninput="updateCellInfo()">
             </div>
             <div class="control-group">
                 <label>Sheet Padding X (mm)</label>
-                <input type="number" id="padX" value="0">
+                <input type="number" id="padX" value="0" oninput="updateCellInfo()">
             </div>
 
             <div class="control-group">
                 <label>Label Inner Padding (mm)</label>
-                <input type="number" id="innerPad" value="5">
+                <input type="number" id="innerPad" value="5" oninput="updateCellInfo()">
             </div>
-             <div class="control-group">
+            <div class="control-group" id="fontSizeGroup">
                 <label>Font Size (px)</label>
                 <input type="number" id="fontSize" value="14">
             </div>
+            <div class="control-group hidden" id="sheetsGroup">
+                <label>Sheets to print</label>
+                <input type="number" id="sheets" value="1" min="1">
+            </div>
+            <div class="control-group hidden" id="fitGroup">
+                <label>Image Fit</label>
+                <select id="fitMode">
+                    <option value="fill" selected>Stretch to fill (force-fit)</option>
+                    <option value="cover">Cover (crop overflow)</option>
+                    <option value="contain">Contain (letterbox)</option>
+                </select>
+            </div>
         </div>
-        
+
         <div style="margin-bottom: 15px;">
             <label style="display:inline-flex; align-items:center; gap:5px;">
                 <input type="checkbox" id="showOutlines" checked> Show Grid Lines (Hidden on print)
@@ -219,6 +334,13 @@
     <div id="output"></div>
 
     <script>
+        // A4 in mm; keep in sync with --page-width/--page-height.
+        const PAGE_W_MM = 210;
+        const PAGE_H_MM = 297;
+
+        let imageDataUrl = null;
+        let imageNatural = { w: 0, h: 0 };
+
         function insertTab() {
             const textarea = document.getElementById('inputData');
             const start = textarea.selectionStart;
@@ -228,27 +350,178 @@
             textarea.focus();
         }
 
+        function getMode() {
+            return document.querySelector('input[name="mode"]:checked').value;
+        }
+
+        function updateMode() {
+            const image = getMode() === 'image';
+            document.getElementById('textControls').classList.toggle('hidden', image);
+            document.getElementById('imageControls').classList.toggle('hidden', !image);
+            document.getElementById('fontSizeGroup').classList.toggle('hidden', image);
+            document.getElementById('sheetsGroup').classList.toggle('hidden', !image);
+            document.getElementById('fitGroup').classList.toggle('hidden', !image);
+            updateCellInfo();
+        }
+
+        function handleFiles(files) {
+            if (!files || !files.length) return;
+            const file = files[0];
+            if (!file.type.startsWith('image/')) {
+                alert('That is not an image file.');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = e => loadImage(e.target.result, file.name);
+            reader.readAsDataURL(file);
+        }
+
+        function loadImage(dataUrl, name) {
+            const probe = new Image();
+            probe.onload = () => {
+                imageDataUrl = dataUrl;
+                imageNatural = { w: probe.naturalWidth, h: probe.naturalHeight };
+                renderImgInfo(name);
+            };
+            probe.onerror = () => alert('Could not decode that image.');
+            probe.src = dataUrl;
+        }
+
+        // mm size of the printable area each image actually fills (cell minus inner padding).
+        function cellContentMM() {
+            const cols = parseInt(document.getElementById('cols').value) || 1;
+            const rows = parseInt(document.getElementById('rows').value) || 1;
+            const padX = parseFloat(document.getElementById('padX').value) || 0;
+            const padY = parseFloat(document.getElementById('padY').value) || 0;
+            const innerPad = parseFloat(document.getElementById('innerPad').value) || 0;
+            const cellW = (PAGE_W_MM - 2 * padX) / cols - 2 * innerPad;
+            const cellH = (PAGE_H_MM - 2 * padY) / rows - 2 * innerPad;
+            return { w: cellW, h: cellH };
+        }
+
+        function fmt(n) { return Math.round(n * 100) / 100; }
+
+        function renderImgInfo(name) {
+            const box = document.getElementById('imgInfo');
+            const c = cellContentMM();
+            const cellAR = c.h > 0 ? c.w / c.h : 0;
+            const imgAR = imageNatural.h > 0 ? imageNatural.w / imageNatural.h : 0;
+            const mismatch = imgAR && cellAR &&
+                Math.abs(imgAR - cellAR) / cellAR > 0.02;
+            box.classList.remove('hidden');
+            box.dataset.name = name || '';
+            box.innerHTML =
+                `<img class="preview" src="${imageDataUrl}" alt="preview">` +
+                `<b>${name || 'pasted image'}</b> — ${imageNatural.w}×${imageNatural.h}px ` +
+                `(aspect ${imgAR ? fmt(imgAR) : '?'}:1)<br>` +
+                `Target cell content: <b>${fmt(c.w)}×${fmt(c.h)}mm</b> ` +
+                `(aspect ${cellAR ? fmt(cellAR) : '?'}:1)` +
+                (mismatch
+                    ? `<br><span class="warn">⚠ Aspect ratios differ — with "Stretch to fill" ` +
+                      `the design will be distorted. Design at the cell's shape, or pick Cover/Contain.</span>`
+                    : '');
+        }
+
+        function updateCellInfo() {
+            if (getMode() === 'image' && imageDataUrl) {
+                renderImgInfo(document.getElementById('imgInfo').dataset.name);
+            }
+        }
+
+        // --- Drop zone wiring ---
+        const dropZone = document.getElementById('dropZone');
+        dropZone.addEventListener('click', () => document.getElementById('imgFile').click());
+        dropZone.addEventListener('dragover', e => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        window.addEventListener('paste', e => {
+            if (getMode() !== 'image') return;
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+            for (const it of items) {
+                if (it.type && it.type.startsWith('image/')) {
+                    const file = it.getAsFile();
+                    const reader = new FileReader();
+                    reader.onload = ev => loadImage(ev.target.result, 'pasted image');
+                    reader.readAsDataURL(file);
+                    e.preventDefault();
+                    return;
+                }
+            }
+        });
+
         function generateLabels() {
-            const rawData = document.getElementById('inputData').value.trim();
+            const mode = getMode();
             const cols = parseInt(document.getElementById('cols').value);
             const rows = parseInt(document.getElementById('rows').value);
-            
+
             // Sheet Padding (Outside the grid)
             const padY = document.getElementById('padY').value;
             const padX = document.getElementById('padX').value;
-            
+
             // Inner Padding (Inside the label)
             const innerPad = document.getElementById('innerPad').value;
-            
-            const fontSize = document.getElementById('fontSize').value;
+
             const showOutlines = document.getElementById('showOutlines').checked;
 
             const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML = ''; 
-            
+            outputDiv.innerHTML = '';
+
             if (showOutlines) outputDiv.classList.add('show-outlines');
             else outputDiv.classList.remove('show-outlines');
 
+            if (mode === 'image') {
+                generateImageSheets(cols, rows, padX, padY, innerPad, outputDiv);
+            } else {
+                generateTextSheets(cols, rows, padX, padY, innerPad, outputDiv);
+            }
+        }
+
+        function newSheet(cols, rows, padX, padY) {
+            const sheet = document.createElement('div');
+            sheet.className = 'sheet';
+            sheet.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            sheet.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+            sheet.style.padding = `${padY}mm ${padX}mm`;
+            return sheet;
+        }
+
+        function generateImageSheets(cols, rows, padX, padY, innerPad, outputDiv) {
+            if (!imageDataUrl) {
+                alert('Load an image first (click, drop, or paste in the box above).');
+                return;
+            }
+            const sheets = Math.max(1, parseInt(document.getElementById('sheets').value) || 1);
+            const fit = document.getElementById('fitMode').value;
+            const perPage = cols * rows;
+
+            for (let p = 0; p < sheets; p++) {
+                const sheet = newSheet(cols, rows, padX, padY);
+                for (let i = 0; i < perPage; i++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'label-cell image-cell';
+                    cell.style.padding = `${innerPad}mm`;
+                    const img = document.createElement('img');
+                    img.className = 'label-img';
+                    img.src = imageDataUrl;
+                    img.style.objectFit = fit;
+                    cell.appendChild(img);
+                    sheet.appendChild(cell);
+                }
+                outputDiv.appendChild(sheet);
+            }
+        }
+
+        function generateTextSheets(cols, rows, padX, padY, innerPad, outputDiv) {
+            const rawData = document.getElementById('inputData').value.trim();
+            const fontSize = document.getElementById('fontSize').value;
             if (!rawData) return;
 
             const dataRows = rawData.split(/\n/).map(row => row.split(/\t/));
@@ -256,12 +529,7 @@
             const totalPages = Math.ceil(dataRows.length / labelsPerPage);
 
             for (let p = 0; p < totalPages; p++) {
-                const sheet = document.createElement('div');
-                sheet.className = 'sheet';
-                
-                sheet.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-                sheet.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-                sheet.style.padding = `${padY}mm ${padX}mm`;
+                const sheet = newSheet(cols, rows, padX, padY);
                 sheet.style.fontSize = `${fontSize}px`;
 
                 const startIdx = p * labelsPerPage;
@@ -272,9 +540,9 @@
                     const labelCell = document.createElement('div');
                     labelCell.className = 'label-cell';
                     labelCell.style.padding = `${innerPad}mm`;
-                    
+
                     rowData.forEach(text => {
-                        let cleanText = text.replace(/^"|"$/g, '').trim(); 
+                        let cleanText = text.replace(/^"|"$/g, '').trim();
                         if(cleanText) {
                             const line = document.createElement('div');
                             line.className = 'label-line';
