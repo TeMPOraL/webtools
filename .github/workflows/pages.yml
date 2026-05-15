@@ -1,0 +1,111 @@
+name: Deploy site + PR preview to Pages
+
+# Publishes `main` at the site root and the most-recently-pushed open PR
+# at a STABLE `/preview/` path (one reused URL, so testing on a phone does
+# not accumulate per-PR URLs in browser history). Requires the repo's
+# Pages "Source" to be set to "GitHub Actions" (Settings -> Pages).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  pull-requests: read
+
+# Don't cancel an in-flight deploy; let runs queue and reconcile.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout main (site root)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+
+      - name: Assemble site root
+        run: |
+          mkdir -p _site
+          rsync -a --delete \
+            --exclude='.git' --exclude='.github' --exclude='_site' \
+            main/ _site/
+          touch _site/.nojekyll
+
+      - name: Determine preview ref
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ref=""
+          label=""
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+             && [ "${{ github.event.action }}" != "closed" ]; then
+            ref="${{ github.event.pull_request.head.sha }}"
+            ref_b="${{ github.event.pull_request.head.ref }}"
+            label="PR #${{ github.event.pull_request.number }} ($ref_b)"
+          else
+            # main push / manual / PR closed: fall back to the most
+            # recently updated PR that is still open.
+            json="$(gh pr list --repo '${{ github.repository }}' --state open \
+                      --json number,headRefName,headRefOid,updatedAt \
+                      --jq 'sort_by(.updatedAt) | reverse | .[0] // empty')"
+            if [ -n "$json" ]; then
+              ref="$(echo "$json"  | jq -r '.headRefOid')"
+              num="$(echo "$json"  | jq -r '.number')"
+              brn="$(echo "$json"  | jq -r '.headRefName')"
+              label="PR #$num ($brn)"
+            fi
+          fi
+          echo "ref=$ref"     >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout preview ref
+        if: steps.prev.outputs.ref != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.prev.outputs.ref }}
+          path: preview
+
+      - name: Assemble /preview/
+        if: steps.prev.outputs.ref != ''
+        run: |
+          mkdir -p _site/preview
+          rsync -a --delete \
+            --exclude='.git' --exclude='.github' \
+            preview/ _site/preview/
+          {
+            echo "Live preview: ${{ steps.prev.outputs.label }}"
+            echo "Commit:       ${{ steps.prev.outputs.ref }}"
+            echo "Deployed:     $(date -u +%FT%TZ)"
+          } > _site/preview/_meta.txt
+          {
+            echo "### Preview: ${{ steps.prev.outputs.label }}"
+            echo "Stable URL base: \`/webtools/preview/\` (e.g. \`/webtools/preview/qr.html\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: No open PR
+        if: steps.prev.outputs.ref == ''
+        run: echo "No open PR — /preview/ not published this run." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
