@@ -2,7 +2,8 @@
 <!--
   LEGACY TOOL — ported verbatim from the standalone qr-code-generator project.
   Exempt from this repo's single-file / CDN-pinning conventions: it keeps its
-  original multi-file layout (css/styles.css, js/qrious.js, js/app.js) and
+  original multi-file layout, with all assets vendored under qr/css/ and
+  qr/js/ (qr/css/styles.css, qr/js/qrious.js, qr/js/app.js), and
   vendored, inlined dependencies. Do not "modernize" it to match the other
   tools. Polish UI is intentional. See CLAUDE.md > Legacy tools.
 -->
@@ -11,7 +12,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generator kodów QR</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="qr/css/styles.css">
 </head>
 <body>
     <div class="container">
@@ -81,7 +82,7 @@
         </div>
     </div>
 
-    <script src="js/qrious.js"></script>
-    <script src="js/app.js"></script>
+    <script src="qr/js/qrious.js"></script>
+    <script src="qr/js/app.js"></script>
 </body>
 </html>
