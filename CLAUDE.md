@@ -60,3 +60,21 @@ automated tests. State explicitly when a change could not be browser-verified.
 
 - Some tools are localized to Polish; check existing UI strings in a file
   before assuming language.
+
+## Legacy tools
+
+Some tools are **ports of pre-existing standalone projects**, brought into
+this repo unchanged for hosting convenience (one repo + GitHub Pages instead
+of scattered one-offs). They are **exempt from the conventions above** — they
+may keep their original multi-file layout (e.g. `css/`, `js/` subdirectories),
+their own dependency-vendoring scheme, and their original language. Do not
+refactor them into the single-file / pinned-CDN shape to "match" the others;
+port faithfully and preserve behavior.
+
+A legacy tool is marked two ways: an HTML comment near the top of its file
+explaining the exemption, and an unobtrusive `Legacy` badge (plus a flag emoji
+for non-English UIs) next to its entry in `index.html`. `qr.html`
+(multi-file: `css/styles.css`, vendored `js/qrious.js`, `js/app.js`; Polish UI)
+is the reference example. Note that legacy tools may use shared-looking paths
+like `css/` and `js/` at the repo root — keep new non-legacy tools self-contained
+so they never collide with these.

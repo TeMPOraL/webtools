@@ -67,6 +67,23 @@
             margin: 10px 0 0;
             color: var(--text);
         }
+        .legacy {
+            color: var(--muted);
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 1px 7px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        .flag {
+            margin-left: 6px;
+            font-size: 0.95rem;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -111,9 +128,9 @@
             <p class="desc">Generate printable label sheets from tab-separated data, or force-fit one image into every cell of a margin-free grid.</p>
         </li>
         <li class="tool">
-            <a href="./qr.html">QR Code Generator</a>
+            <a href="./qr.html">QR Code Generator</a><span class="flag" title="Polish UI" aria-label="Polish UI">🇵🇱</span><span class="legacy" title="Legacy tool — exempt from repo conventions">Legacy</span>
             <div class="path">qr.html</div>
-            <p class="desc">Generate QR codes with custom colors, module styles, transparent background, and an embedded logo; download as PNG. (Polish UI)</p>
+            <p class="desc">Generate QR codes with custom colors, module styles, transparent background, and an embedded logo; download as PNG.</p>
         </li>
     </ul>
 </main>
