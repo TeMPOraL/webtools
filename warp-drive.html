@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Warp Drive Simulator V1 (360° Chromatic)</title>
+    <title>Warp Drive Simulator V3 (360° Chromatic)</title>
     <style>
         body, html {
             margin: 0;
@@ -239,8 +239,8 @@
                 if (dAlpha > 180) dAlpha -= 360;
                 if (dAlpha < -180) dAlpha += 360;
 
-                this.yaw = (dAlpha * rad) + this.touchYawOffset;
-                this.pitch = (dBeta * rad) + this.touchPitchOffset;
+                this.yaw = (-dAlpha * rad) + this.touchYawOffset;
+                this.pitch = (-dBeta * rad) + this.touchPitchOffset;
 
                 this.pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.pitch));
             }
