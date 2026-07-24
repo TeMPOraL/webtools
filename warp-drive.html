@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Warp Drive Simulator V1 (360° Chromatic)</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-family: sans-serif;
+            z-index: 10;
+            transition: opacity 0.5s;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background-color: #333;
+            color: #fff;
+            border: 2px solid #555;
+            border-radius: 8px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background-color: #555;
+            border-color: #fff;
+        }
+
+        .instructions {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #aaa;
+            text-align: center;
+            max-width: 320px;
+            line-height: 1.4;
+        }
+
+        #statusText {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #ff5555;
+            height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <button id="startBtn">Engage Viewport</button>
+        <div class="instructions">
+            Gyroscope requires <b>HTTPS</b>. <br>
+            Touch/drag to pan is always available.
+        </div>
+        <div id="statusText"></div>
+    </div>
+
+    <canvas id="warpCanvas"></canvas>
+
+    <script>
+        class WarpDrive {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d', { alpha: false });
+
+                this.config = {
+                    numStars: 1500,
+                    fov: 400,
+                    spread: 8000,
+                    warpSpeed: 9.3,
+                    streakLength: 45,
+                    baseThickness: 1.4
+                };
+
+                this.stars = [];
+                this.width = 0;
+                this.height = 0;
+                this.cx = 0;
+                this.cy = 0;
+
+                this.pitch = 0;
+                this.yaw = 0;
+
+                this.isDragging = false;
+                this.lastX = 0;
+                this.lastY = 0;
+                this.touchYawOffset = 0;
+                this.touchPitchOffset = 0;
+
+                this.gyroInitialAlpha = null;
+                this.gyroInitialBeta = null;
+                this.hasReceivedGyroData = false;
+
+                this.init();
+            }
+
+            init() {
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+
+                this.setupControls();
+
+                for (let i = 0; i < this.config.numStars; i++) {
+                    this.stars.push(new Star(this));
+                }
+
+                this.render();
+            }
+
+            setupControls() {
+                const overlay = document.getElementById('overlay');
+                const startBtn = document.getElementById('startBtn');
+                const statusText = document.getElementById('statusText');
+
+                const dismissOverlay = () => {
+                    overlay.style.opacity = '0';
+                    setTimeout(() => overlay.style.display = 'none', 500);
+                };
+
+                // The handler for the orientation event
+                const orientationHandler = (e) => {
+                    // Check if we are actually getting valid sensor numbers (not null)
+                    if (e.alpha !== null && e.beta !== null) {
+                        this.hasReceivedGyroData = true;
+                        this.handleOrientation(e);
+                    }
+                };
+
+                startBtn.addEventListener('click', async () => {
+                    startBtn.disabled = true;
+                    statusText.innerText = "Requesting sensors...";
+                    statusText.style.color = "#fff";
+
+                    // 1. iOS 13+ requires explicit permission request
+                    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                        try {
+                            const permission = await DeviceOrientationEvent.requestPermission();
+                            if (permission === 'granted') {
+                                window.addEventListener('deviceorientation', orientationHandler);
+                            } else {
+                                throw new Error("Permission denied by user.");
+                            }
+                        } catch (err) {
+                            statusText.style.color = "#ff5555";
+                            statusText.innerText = "Gyro blocked. Using Touch.";
+                            setTimeout(dismissOverlay, 2000);
+                            return; // Exit early
+                        }
+                    } else {
+                        // 2. Android or non-iOS 13 device. Just attach the listener.
+                        window.addEventListener('deviceorientation', orientationHandler);
+                    }
+
+                    // 3. Verify that the sensor is actually emitting data
+                    // If running over HTTP or in a restricted iframe, the event fires but yields null, or doesn't fire.
+                    setTimeout(() => {
+                        if (this.hasReceivedGyroData) {
+                            dismissOverlay();
+                        } else {
+                            window.removeEventListener('deviceorientation', orientationHandler);
+                            statusText.style.color = "#ff5555";
+                            statusText.innerText = "Gyroscope unavailable (HTTP/Iframe). Using Touch.";
+                            setTimeout(dismissOverlay, 2500);
+                        }
+                    }, 500);
+                });
+
+                // Touch & Mouse Controls (Always active as fallback)
+                const downEvent = (e) => {
+                    this.isDragging = true;
+                    this.lastX = e.touches ? e.touches[0].clientX : e.clientX;
+                    this.lastY = e.touches ? e.touches[0].clientY : e.clientY;
+                };
+
+                const moveEvent = (e) => {
+                    if (!this.isDragging) return;
+                    const x = e.touches ? e.touches[0].clientX : e.clientX;
+                    const y = e.touches ? e.touches[0].clientY : e.clientY;
+
+                    const dx = x - this.lastX;
+                    const dy = y - this.lastY;
+
+                    this.touchYawOffset -= dx * 0.005;
+                    this.touchPitchOffset += dy * 0.005;
+
+                    this.touchPitchOffset = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.touchPitchOffset));
+
+                    this.lastX = x;
+                    this.lastY = y;
+                };
+
+                const upEvent = () => { this.isDragging = false; };
+
+                this.canvas.addEventListener('mousedown', downEvent);
+                this.canvas.addEventListener('mousemove', moveEvent);
+                window.addEventListener('mouseup', upEvent);
+
+                this.canvas.addEventListener('touchstart', downEvent, {passive: false});
+                this.canvas.addEventListener('touchmove', moveEvent, {passive: false});
+                window.addEventListener('touchend', upEvent);
+            }
+
+            handleOrientation(e) {
+                const rad = Math.PI / 180;
+
+                if (this.gyroInitialAlpha === null) {
+                    this.gyroInitialAlpha = e.alpha;
+                    this.gyroInitialBeta = e.beta;
+                }
+
+                let dAlpha = e.alpha - this.gyroInitialAlpha;
+                let dBeta = e.beta - this.gyroInitialBeta;
+
+                if (dAlpha > 180) dAlpha -= 360;
+                if (dAlpha < -180) dAlpha += 360;
+
+                this.yaw = (dAlpha * rad) + this.touchYawOffset;
+                this.pitch = (dBeta * rad) + this.touchPitchOffset;
+
+                this.pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.pitch));
+            }
+
+            updateCamera() {
+                // If gyro isn't working, just apply touch controls
+                if (!this.hasReceivedGyroData) {
+                    this.yaw = this.touchYawOffset;
+                    this.pitch = this.touchPitchOffset;
+                }
+            }
+
+            resize() {
+                this.width = this.canvas.width = window.innerWidth;
+                this.height = this.canvas.height = window.innerHeight;
+                this.cx = this.width / 2;
+                this.cy = this.height / 2;
+            }
+
+            render() {
+                this.updateCamera();
+
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+
+                this.ctx.globalCompositeOperation = 'lighter';
+                this.ctx.lineCap = 'round';
+
+                for (let i = 0; i < this.stars.length; i++) {
+                    this.stars[i].update();
+                    this.stars[i].draw(this.ctx);
+                }
+
+                this.ctx.globalCompositeOperation = 'source-over';
+                requestAnimationFrame(() => this.render());
+            }
+        }
+
+        class Star {
+            constructor(engine) {
+                this.engine = engine;
+                this.x = 0; this.y = 0; this.z = 0;
+                this.r = 255; this.g = 255; this.b = 255;
+                this.weight = 1;
+                this.spawn(true);
+            }
+
+            spawn(randomizeZ = false) {
+                const spread = this.engine.config.spread;
+
+                this.x = (Math.random() - 0.5) * spread;
+                this.y = (Math.random() - 0.5) * spread;
+
+                if (randomizeZ) {
+                    this.z = (Math.random() - 0.5) * spread;
+                } else {
+                    this.z = spread / 2;
+                }
+
+                const rand = Math.random();
+                if (rand > 0.5) {
+                    this.r = 255; this.g = 80; this.b = 80;
+                } else {
+                    this.r = 80; this.g = 130; this.b = 255;
+                }
+
+                this.weight = 0.8 + (Math.random() * 0.4);
+            }
+
+            update() {
+                const spread = this.engine.config.spread;
+                this.z -= this.engine.config.warpSpeed;
+                if (this.z < -spread / 2) this.spawn(false);
+            }
+
+            rotate3D(x, y, z, pitch, yaw) {
+                const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+                const x1 = x * cosY - z * sinY;
+                const z1 = z * cosY + x * sinY;
+
+                const cosX = Math.cos(pitch), sinX = Math.sin(pitch);
+                const y2 = y * cosX - z1 * sinX;
+                const z2 = z1 * cosX + y * sinX;
+
+                return { x: x1, y: y2, z: z2 };
+            }
+
+            draw(ctx) {
+                const cfg = this.engine.config;
+                const spread = cfg.spread;
+
+                const rawX = this.x;
+                const rawY = this.y;
+                const rawZ = this.z;
+                const tailRawZ = this.z + (cfg.warpSpeed * cfg.streakLength);
+
+                let head = this.rotate3D(rawX, rawY, rawZ, this.engine.pitch, this.engine.yaw);
+                let tail = this.rotate3D(rawX, rawY, tailRawZ, this.engine.pitch, this.engine.yaw);
+
+                const distFromCam = Math.sqrt(head.x*head.x + head.y*head.y + head.z*head.z);
+                let alpha = 1 - (distFromCam / (spread / 2));
+                if (alpha < 0) alpha = 0;
+
+                if (head.z > 0 && head.z < 100) alpha *= (head.z / 100);
+
+                if (alpha <= 0.05) return;
+
+                const near = 10;
+                if (head.z < near && tail.z < near) return;
+
+                if (head.z < near) {
+                    const t = (near - head.z) / (tail.z - head.z);
+                    head.x += t * (tail.x - head.x);
+                    head.y += t * (tail.y - head.y);
+                    head.z = near;
+                } else if (tail.z < near) {
+                    const t = (near - tail.z) / (head.z - tail.z);
+                    tail.x += t * (head.x - tail.x);
+                    tail.y += t * (head.y - tail.y);
+                    tail.z = near;
+                }
+
+                const headScale = cfg.fov / head.z;
+                const tailScale = cfg.fov / tail.z;
+
+                const headX2d = (head.x * headScale) + this.engine.cx;
+                const headY2d = (head.y * headScale) + this.engine.cy;
+                const tailX2d = (tail.x * tailScale) + this.engine.cx;
+                const tailY2d = (tail.y * tailScale) + this.engine.cy;
+
+                if (Math.abs(headX2d - tailX2d) < 0.1 && Math.abs(headY2d - tailY2d) < 0.1) return;
+
+                const gradient = ctx.createLinearGradient(tailX2d, tailY2d, headX2d, headY2d);
+                gradient.addColorStop(0, `rgba(${this.r}, ${this.g}, ${this.b}, 0)`);
+                gradient.addColorStop(0.2, `rgba(${this.r}, ${this.g}, ${this.b}, ${alpha * 0.7})`);
+                gradient.addColorStop(0.4, `rgba(255, 255, 255, ${alpha})`);
+                gradient.addColorStop(1, `rgba(255, 255, 255, ${alpha})`);
+
+                ctx.beginPath();
+                ctx.moveTo(tailX2d, tailY2d);
+                ctx.lineTo(headX2d, headY2d);
+
+                ctx.lineWidth = cfg.baseThickness * this.weight * headScale;
+                ctx.strokeStyle = gradient;
+                ctx.stroke();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new WarpDrive('warpCanvas');
+        });
+    </script>
+</body>
+</html>
