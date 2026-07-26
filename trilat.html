@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Trilat Field Survey V1</title>
+<title>Trilat Field Survey V2</title>
 <style>
 :root{
   --bg:#0f172a; --bg2:#0b1120; --surface:#1e293b; --surface2:#243247;
@@ -107,13 +107,33 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 #toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:calc(96px + env(safe-area-inset-bottom)); background:#111c31f0; border:1px solid var(--border); color:var(--text); padding:9px 14px; border-radius:10px; font-size:.9rem; z-index:50; max-width:92vw; transition:opacity .25s; pointer-events:none; }
 #toast.bad{ border-color:var(--bad); color:var(--bad); }
 #toast[hidden]{ display:none; }
+
+#bgPanel{ position:absolute; top:8px; left:8px; display:flex; flex-direction:column; gap:6px; background:#111c31e8; border:1px solid var(--border); border-radius:10px; padding:8px; z-index:5; }
+#bgPanel button{ background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:8px; min-height:40px; padding:0 12px; font-size:.86rem; text-align:left; }
+#bgPanel button:disabled{ opacity:.4; }
+#bgPanel button.active{ border-color:var(--warn); color:var(--warn); }
+#bgPanel .brow{ display:flex; gap:6px; }
+#bgPanel .brow button{ flex:1; text-align:center; }
+#bgHint{ position:absolute; left:50%; transform:translateX(-50%); bottom:34px; color:var(--warn); font-size:.8rem; background:#111c31e0; border-radius:8px; padding:4px 10px; pointer-events:none; }
+
+#helpOv{ position:fixed; inset:0; background:#0b1120d8; z-index:100; overflow-y:auto; overscroll-behavior:contain; }
+#helpBox{ max-width:640px; margin:20px auto; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 20px calc(24px + env(safe-area-inset-bottom)); position:relative; }
+#helpBox h2{ margin:4px 0 12px; font-size:1.2rem; padding-right:44px; }
+#helpBox h3{ margin:18px 0 6px; font-size:.95rem; color:var(--accent); text-transform:none; letter-spacing:0; }
+#helpBox p, #helpBox li{ font-size:.9rem; line-height:1.55; color:var(--text); }
+#helpBox ul, #helpBox ol{ padding-left:20px; margin:6px 0; }
+#helpBox li{ margin:4px 0; }
+#helpBox code{ background:var(--bg2); border:1px solid var(--border); border-radius:5px; padding:0 5px; font-size:.85em; }
+#helpBox .m{ color:var(--muted); }
+#helpClose{ position:absolute; top:10px; right:10px; background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:10px; min-width:42px; min-height:42px; font-size:1.1rem; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Trilat <span class="ver">V1</span></h1>
+  <h1>Trilat <span class="ver">V2</span></h1>
   <div id="stats"></div>
+  <button id="helpBtn" class="iconbtn" title="Manual">?</button>
   <button id="undoBtn" class="iconbtn" title="Undo last change">↩</button>
   <button id="wakeBtn" class="iconbtn" title="Keep screen awake">☀</button>
 </header>
@@ -125,7 +145,20 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
       <button id="fitBtn" title="Fit view">⛶</button>
       <button id="ellBtn" title="Error ellipse scale">±σ</button>
       <button id="chkBtn" title="Toggle suggested checks">✓?</button>
+      <button id="bgBtn" title="Background image">🖼</button>
     </div>
+    <div id="bgPanel" hidden>
+      <button id="bgLoadBtn">Load image…</button>
+      <button id="bgAdjBtn">Adjust (drag/pinch)</button>
+      <div class="brow">
+        <button id="bgRotL" title="Rotate left">⟲</button>
+        <button id="bgRotR" title="Rotate right">⟳</button>
+        <button id="bgOpBtn" title="Opacity">◐</button>
+      </div>
+      <button id="bgRemBtn">Remove image</button>
+    </div>
+    <div id="bgHint" hidden>drag to move · pinch to scale &amp; rotate · Adjust locks</div>
+    <input type="file" id="bgFile" accept="image/*" hidden>
   </section>
   <section id="panelSec">
     <nav id="tabs">
@@ -164,6 +197,63 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 
 <div id="toast" hidden></div>
 
+<div id="helpOv" hidden>
+<div id="helpBox">
+<button id="helpClose">✕</button>
+<h2>Trilat Field Survey — manual</h2>
+<p>Records tape-measured <b>distances between marks</b> (pegs, corners, fence posts) and continuously computes the best-fitting 2D positions by least-squares network adjustment — trilateration only, no angles needed. The first mark becomes the origin (0,0), the second defines the +X axis; the third mark's side (or your plan) fixes the mirror orientation. All data stays on this device.</p>
+
+<h3>Field quick-start</h3>
+<ol>
+<li>Tap <b>FROM</b> → pick or create a mark; same for <b>TO</b>; type the taped distance in metres; hit <b>＋</b>.</li>
+<li>FROM stays selected — keep shooting from the same station to other targets.</li>
+<li>Watch the header after every entry: <b>σ</b> should stay at a few mm and residual chips in the Log green.</li>
+<li>If a red <b>⚠ remeasure</b> warning names a pair, re-tape it before moving on.</li>
+<li>Open <b>Checks</b> and shoot suggested pairs until redundancy is at least ≈ the number of marks.</li>
+<li><b>Data → Download/Share</b> the .txt before leaving the field.</li>
+</ol>
+
+<h3>Planning at home</h3>
+<ul>
+<li><b>Marks tab:</b> pre-add every mark you intend to set out, optionally with sketch coordinates (metres, any local frame). Planned marks show as dashed squares on the map and appear in the pickers; measurements snap them into place. A plan also decides the mirror orientation of the solution.</li>
+<li><b>Background image:</b> 🖼 on the map → <i>Load image</i> (photo of a paper sketch, satellite screenshot, site plan). While <i>Adjust</i> is on, drag moves the image and a two-finger pinch scales <i>and rotates</i> it (mouse: wheel scales, ⟲⟳ rotate) — line it up with your planned or measured marks, then tap <i>Adjust</i> again to lock. ◐ cycles opacity. The image is stored on this device only and is <b>not</b> part of the text export.</li>
+</ul>
+
+<h3>Entering measurements</h3>
+<ul>
+<li><b>Touch:</b> FROM/TO pickers with per-mark measurement counts; ⇄ swaps; comma or dot decimals. You can also tap marks directly on the map — first tap sets FROM (green ring), second sets TO (pink ring).</li>
+<li><b>Keyboard (⌨):</b> one line per shot — <code>A B 12.34</code> full form; <code>B 12.34</code> uses the sticky FROM; <code>12.34</code> repeats the current pair. Enter adds. New names create marks automatically.</li>
+<li>Measuring the same pair several times is fine — repeats are averaged by the adjustment and add redundancy.</li>
+<li>Fix a typo by tapping the number in the <b>Log</b>; ✕ deletes (tap twice); ↩ in the header undoes anything.</li>
+</ul>
+
+<h3>Reading the map</h3>
+<ul>
+<li>Drag pans, pinch or wheel zooms, double-tap or ⛶ re-fits.</li>
+<li>Grey lines = measurements · amber = residual &gt; 2σ · <b>red = suspect</b> · blue = latest entry.</li>
+<li>Blue ellipses = <b>95% confidence regions</b> of each mark, exaggerated ×N (see legend; ±σ cycles auto/×1/×10/…/off).</li>
+<li>Dashed cyan lines = suggested <b>check pairs</b> with predicted distance — tap one to preload it into the entry bar.</li>
+<li>Dashed squares = planned, unmeasured marks · dashed orange circles = <b>weak</b> marks that need more distances.</li>
+</ul>
+
+<h3>The numbers</h3>
+<ul>
+<li><b>redundancy</b> = measurements − unknowns. Negative: not solvable yet. Zero: solvable, but nothing cross-checks your work — a blunder would be invisible. Every extra measurement adds a check and shrinks the ellipses.</li>
+<li><b>σ</b> = RMS of residuals ≈ your overall measuring noise. A steel tape on a garden plot should give a few mm; a sudden jump means a bad measurement, not a worse tape.</li>
+<li><b>Residual</b> = measured − computed, shown per row in the Log.</li>
+<li><b>Suspects</b> are found two ways: residuals far out of family (robust median test), and a leave-one-out scan — "dropping X–Y alone would cut σ …" names the single measurement most worth re-taping.</li>
+</ul>
+
+<h3>Data safety</h3>
+<ul>
+<li>Everything autosaves to this browser's localStorage on every keystroke — it survives reloads, tab kills and phone reboots. It does <b>not</b> survive clearing site data, and does not sync between browsers/devices: export the .txt regularly.</li>
+<li>The export feeds straight into <code>trilat.py</code>; the <code>#!plan</code>/<code>#!mark</code> lines are comments to it. Import accepts the same format (replace or append).</li>
+<li>Install as an app via the browser menu ("Add to Home screen"). ☀ keeps the screen awake while measuring.</li>
+</ul>
+<p class="m">Coordinates are in a local frame in metres. CSV export gives adjusted coordinates; SVG export gives the current map view.</p>
+</div>
+</div>
+
 <script>
 'use strict';
 /* =====================================================================
@@ -194,7 +284,7 @@ function toast(msg, bad){
 /* ------------------------------------------------ state ------------ */
 const LS_KEY = 'trilat-survey-v1';
 function defaultState(){
-  return { v: 1, marks: [], obs: [], nextId: 1,
+  return { v: 1, marks: [], obs: [], nextId: 1, bg: null,
     ui: { from: '', to: '', dist: '', kbdDraft: '', kbd: false, tab: 'log',
           showChecks: true, showEll: true, ellScale: 'auto', wake: false, lastObsId: 0 } };
 }
@@ -773,6 +863,11 @@ function csvText(){
 /* ------------------------------------------------ plot ------------- */
 let view = null; // null = autofit; else {cx, cy, k} (world centre, px per metre)
 let plotW = 0, plotH = 0, plotQueued = false;
+// static layers: background rect + calibrated image element stay put, only the
+// dynamic content group is rebuilt each frame (avoids re-serializing the image)
+$('plot').innerHTML = '<rect width="100%" height="100%" fill="#0b1120"/>' +
+  '<image id="bgImg" preserveAspectRatio="none" style="display:none"/>' +
+  '<g id="mainG"></g>';
 
 function autofitView(){
   const pts = [];
@@ -815,8 +910,8 @@ function renderPlot(){
   plotW = svg.clientWidth; plotH = svg.clientHeight;
   if(!plotW || !plotH) return;
   const v = curView();
+  updateBgLayer(v);
   const el = [];
-  el.push('<rect width="100%" height="100%" fill="#0b1120"/>');
 
   // ---- grid
   const spanW = plotW / v.k, spanH = plotH / v.k;
@@ -915,8 +1010,99 @@ function renderPlot(){
   if(state.ui.showEll && sol && sol.covInfo) leg.push('ellipses 95% ×' + exag);
   if(leg.length) el.push('<text x="10" y="' + (plotH - 10) + '" fill="#64748b" font-size="11" font-family="system-ui">' + esc(leg.join(' · ')) + '</text>');
 
-  svg.innerHTML = el.join('');
+  $('mainG').innerHTML = el.join('');
 }
+
+/* ---- background image (planning aid) ----
+   state.bg = {cx, cy, scale (m per image px), rot (rad, world CCW), opacity,
+   visible, w, h}; pixels live separately under BG_KEY so undo snapshots and the
+   text export stay small. Mapping: world = c + scale * Rot(rot) * (lx, -ly),
+   where (lx, ly) are image coords from the centre, y down. */
+const BG_KEY = LS_KEY + '-bg';
+let bgData = null, bgAdjust = false;
+try{ bgData = localStorage.getItem(BG_KEY); }catch(e){}
+
+function setImgAttrs(url, w, h){
+  const img = $('bgImg');
+  img.setAttribute('href', url);
+  img.setAttribute('x', -w / 2); img.setAttribute('y', -h / 2);
+  img.setAttribute('width', w); img.setAttribute('height', h);
+}
+if(bgData && state.bg && state.bg.w) setImgAttrs(bgData, state.bg.w, state.bg.h);
+else if(!bgData) state.bg = null;
+
+function updateBgLayer(v){
+  const img = $('bgImg'), m = state.bg;
+  if(!m || !m.visible || !bgData || !m.w){ img.style.display = 'none'; return; }
+  const [sx, sy] = W2S([m.cx, m.cy], v);
+  img.setAttribute('transform', 'translate(' + sx.toFixed(1) + ' ' + sy.toFixed(1) + ') rotate(' + (-m.rot * 180 / Math.PI).toFixed(2) + ') scale(' + (m.scale * v.k).toPrecision(6) + ')');
+  img.setAttribute('opacity', m.opacity);
+  img.style.display = '';
+}
+
+function setBgFromDataUrl(dataUrl){
+  const im = new Image();
+  im.onload = () => {
+    // downscale + JPEG-compress so it fits localStorage
+    let w = im.naturalWidth, h = im.naturalHeight;
+    const f = Math.min(1, 1600 / Math.max(w, h));
+    w = Math.max(1, Math.round(w * f)); h = Math.max(1, Math.round(h * f));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(im, 0, 0, w, h);
+    const url = cv.toDataURL('image/jpeg', 0.82);
+    bgData = url;
+    try{ localStorage.setItem(BG_KEY, url); }
+    catch(e){ toast('Image too large to persist — it will be lost on reload', true); }
+    const v = curView();
+    state.bg = { cx: v.cx, cy: v.cy, rot: 0, scale: (plotW / v.k) * 0.8 / w,
+                 opacity: 0.6, visible: true, w, h };
+    setImgAttrs(url, w, h);
+    save();
+    bgAdjust = true;
+    renderBgPanel(); requestPlot();
+    toast('Fit the image: drag to move, pinch to scale & rotate, then lock with Adjust');
+  };
+  im.onerror = () => toast('Could not read that image', true);
+  im.src = dataUrl;
+}
+function removeBg(){
+  bgData = null; state.bg = null; bgAdjust = false;
+  try{ localStorage.removeItem(BG_KEY); }catch(e){}
+  $('bgImg').style.display = 'none';
+  save(); renderBgPanel(); requestPlot();
+}
+function renderBgPanel(){
+  const has = !!(state.bg && bgData);
+  $('bgAdjBtn').disabled = $('bgRotL').disabled = $('bgRotR').disabled = $('bgOpBtn').disabled = $('bgRemBtn').disabled = !has;
+  $('bgAdjBtn').classList.toggle('active', bgAdjust);
+  $('bgBtn').classList.toggle('off', !has);
+  if(has) $('bgOpBtn').textContent = '◐ ' + Math.round(state.bg.opacity * 100) + '%';
+  $('bgHint').hidden = !(bgAdjust && has);
+}
+$('bgBtn').addEventListener('click', () => { const p = $('bgPanel'); p.hidden = !p.hidden; if(!p.hidden) renderBgPanel(); });
+$('bgLoadBtn').addEventListener('click', () => $('bgFile').click());
+$('bgFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const rd = new FileReader();
+  rd.onload = () => setBgFromDataUrl(rd.result);
+  rd.readAsDataURL(f);
+  e.target.value = '';
+});
+$('bgAdjBtn').addEventListener('click', () => {
+  bgAdjust = !bgAdjust;
+  renderBgPanel();
+  if(!bgAdjust){ save(); toast('Background locked'); }
+});
+$('bgRotL').addEventListener('click', () => { if(state.bg){ state.bg.rot += Math.PI / 36; saveSoon(); requestPlot(); } });
+$('bgRotR').addEventListener('click', () => { if(state.bg){ state.bg.rot -= Math.PI / 36; saveSoon(); requestPlot(); } });
+$('bgOpBtn').addEventListener('click', () => {
+  if(!state.bg) return;
+  state.bg.opacity = state.bg.opacity < 0.45 ? 0.6 : state.bg.opacity < 0.8 ? 1 : 0.3;
+  saveSoon(); renderBgPanel(); requestPlot();
+});
+$('bgRemBtn').addEventListener('click', () => { if(confirm('Remove the background image?')) removeBg(); });
 
 /* ---- plot gestures: pan / pinch / wheel / tap ---- */
 (function(){
@@ -925,17 +1111,20 @@ function renderPlot(){
   let pinch = null, down = null, moved = false;
 
   svg.addEventListener('pointerdown', e => {
-    svg.setPointerCapture(e.pointerId);
+    try{ svg.setPointerCapture(e.pointerId); }catch(err){}
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if(pointers.size === 1){ down = { x: e.clientX, y: e.clientY, t: Date.now() }; moved = false; }
     if(pointers.size === 2){
       const [p1, p2] = [...pointers.values()];
       pinch = { d: Math.hypot(p1.x - p2.x, p1.y - p2.y),
+                a: Math.atan2(p2.y - p1.y, p2.x - p1.x),
                 mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
-                view: { ...curView() } };
+                view: { ...curView() },
+                bg: (bgAdjust && state.bg) ? { ...state.bg } : null };
     }
     e.preventDefault();
   });
+  function s2w(mx, my, v){ return [v.cx + (mx - plotW / 2) / v.k, v.cy - (my - plotH / 2) / v.k]; }
   svg.addEventListener('pointermove', e => {
     const prev = pointers.get(e.pointerId);
     if(!prev) return;
@@ -943,10 +1132,17 @@ function renderPlot(){
     if(pointers.size === 1 && down){
       if(Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) moved = true;
       if(moved){
-        if(!view) view = { ...curView() };
-        view.cx -= (e.clientX - prev.x) / view.k;
-        view.cy += (e.clientY - prev.y) / view.k;
-        requestPlot();
+        if(bgAdjust && state.bg){
+          const v = curView();
+          state.bg.cx += (e.clientX - prev.x) / v.k;
+          state.bg.cy -= (e.clientY - prev.y) / v.k;
+          saveSoon(); requestPlot();
+        }else{
+          if(!view) view = { ...curView() };
+          view.cx -= (e.clientX - prev.x) / view.k;
+          view.cy += (e.clientY - prev.y) / view.k;
+          requestPlot();
+        }
       }
     }else if(pointers.size === 2 && pinch){
       moved = true;
@@ -955,17 +1151,32 @@ function renderPlot(){
       const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
       const sv = pinch.view;
       const rect = svg.getBoundingClientRect();
-      const k = Math.max(0.005, Math.min(4000, sv.k * (d / Math.max(pinch.d, 1))));
-      const wx = sv.cx + (pinch.mid.x - rect.left - plotW / 2) / sv.k;
-      const wy = sv.cy - (pinch.mid.y - rect.top - plotH / 2) / sv.k;
-      view = { k, cx: wx - (mid.x - rect.left - plotW / 2) / k, cy: wy + (mid.y - rect.top - plotH / 2) / k };
-      requestPlot();
+      if(pinch.bg){
+        // scale + rotate + translate the background so the image point under
+        // the initial pinch midpoint follows the fingers
+        const m0 = pinch.bg;
+        const s1 = Math.max(1e-6, m0.scale * (d / Math.max(pinch.d, 1)));
+        const rot1 = m0.rot - (Math.atan2(p2.y - p1.y, p2.x - p1.x) - pinch.a);
+        const W0 = s2w(pinch.mid.x - rect.left, pinch.mid.y - rect.top, sv);
+        const W1 = s2w(mid.x - rect.left, mid.y - rect.top, sv);
+        const ux = ( Math.cos(m0.rot) * (W0[0] - m0.cx) + Math.sin(m0.rot) * (W0[1] - m0.cy)) / m0.scale;
+        const uy = (-Math.sin(m0.rot) * (W0[0] - m0.cx) + Math.cos(m0.rot) * (W0[1] - m0.cy)) / m0.scale;
+        state.bg.scale = s1; state.bg.rot = rot1;
+        state.bg.cx = W1[0] - s1 * (Math.cos(rot1) * ux - Math.sin(rot1) * uy);
+        state.bg.cy = W1[1] - s1 * (Math.sin(rot1) * ux + Math.cos(rot1) * uy);
+        saveSoon(); requestPlot();
+      }else{
+        const k = Math.max(0.005, Math.min(4000, sv.k * (d / Math.max(pinch.d, 1))));
+        const [wx, wy] = s2w(pinch.mid.x - rect.left, pinch.mid.y - rect.top, sv);
+        view = { k, cx: wx - (mid.x - rect.left - plotW / 2) / k, cy: wy + (mid.y - rect.top - plotH / 2) / k };
+        requestPlot();
+      }
     }
   });
   function up(e){
     pointers.delete(e.pointerId);
     if(pointers.size < 2) pinch = null;
-    if(pointers.size === 0 && down && !moved && Date.now() - down.t < 600){
+    if(pointers.size === 0 && down && !moved && !bgAdjust && Date.now() - down.t < 600){
       const t = e.target.closest ? (e.target.closest('[data-mark]') || e.target.closest('[data-check]')) : null;
       if(t && t.dataset.mark) tapMark(t.dataset.mark);
       else if(t && t.dataset.check){ const [a, b] = t.dataset.check.split('|'); useCheck(a, b); }
@@ -976,6 +1187,11 @@ function renderPlot(){
   svg.addEventListener('pointercancel', up);
   svg.addEventListener('wheel', e => {
     e.preventDefault();
+    if(bgAdjust && state.bg){ // mouse fallback for image scaling
+      state.bg.scale *= e.deltaY < 0 ? 1.05 : 1 / 1.05;
+      saveSoon(); requestPlot();
+      return;
+    }
     const v = { ...curView() };
     const rect = svg.getBoundingClientRect();
     const f = e.deltaY < 0 ? 1.2 : 1 / 1.2;
@@ -1195,6 +1411,10 @@ $('kbdIn').addEventListener('keydown', e => { if(e.key === 'Enter') kbdAdd(); })
 $('kbdIn').addEventListener('input', () => { state.ui.kbdDraft = $('kbdIn').value; saveSoon(); });
 
 $('undoBtn').addEventListener('click', undo);
+$('helpBtn').addEventListener('click', () => { $('helpOv').hidden = false; });
+$('helpClose').addEventListener('click', () => { $('helpOv').hidden = true; });
+$('helpOv').addEventListener('click', e => { if(e.target.id === 'helpOv') $('helpOv').hidden = true; });
+document.addEventListener('keydown', e => { if(e.key === 'Escape'){ $('helpOv').hidden = true; closePicker(); } });
 $('fitBtn').addEventListener('click', () => { view = null; requestPlot(); });
 $('chkBtn').addEventListener('click', () => { state.ui.showChecks = !state.ui.showChecks; save(); renderEntry(); requestPlot(); });
 $('ellBtn').addEventListener('click', () => {
@@ -1259,7 +1479,7 @@ $('panel').addEventListener('click', e => {
       if(confirm('Delete ALL measurements (marks and plans stay)?')){ checkpoint(); state.obs = []; state.ui.from = ''; state.ui.to = ''; afterMutate(); }
       break;
     case 'wipeBtn':
-      if(confirm('Wipe EVERYTHING — marks, plans and measurements? Export first if unsure.')){ checkpoint(); const ui = state.ui; state = defaultState(); state.ui = ui; state.ui.from = ''; state.ui.to = ''; afterMutate(); }
+      if(confirm('Wipe EVERYTHING — marks, plans, measurements and background image? Export first if unsure.')){ checkpoint(); const ui = state.ui; state = defaultState(); state.ui = ui; state.ui.from = ''; state.ui.to = ''; removeBg(); afterMutate(); }
       break;
   }
 });
@@ -1323,6 +1543,7 @@ const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwH
 new ResizeObserver(() => requestPlot()).observe($('plotSec'));
 recompute();
 renderAll();
+renderBgPanel();
 if(state.ui.wake && 'wakeLock' in navigator) acquireWake();
 </script>
 </body>
