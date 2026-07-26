@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Trilat Field Survey V1</title>
+<style>
+:root{
+  --bg:#0f172a; --bg2:#0b1120; --surface:#1e293b; --surface2:#243247;
+  --border:#3b4a63; --text:#e2e8f0; --muted:#94a3b8; --accent:#60a5fa;
+  --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --cyan:#22d3ee;
+}
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+[hidden]{ display:none !important; }
+html,body{ height:100%; }
+body{
+  margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg); color:var(--text);
+  display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden;
+}
+button{ font-family:inherit; cursor:pointer; touch-action:manipulation; }
+input,textarea{
+  background:var(--bg2); border:1px solid var(--border); color:var(--text);
+  border-radius:8px; padding:7px 8px; font-size:1rem; font-family:inherit;
+}
+input:focus,textarea:focus{ outline:1px solid var(--accent); }
+
+header{ flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:6px 10px; border-bottom:1px solid var(--border); }
+h1{ font-size:1.05rem; margin:0; white-space:nowrap; }
+h1 .ver{ color:var(--muted); font-size:.72em; font-weight:400; }
+#stats{ display:flex; gap:5px; flex-wrap:wrap; flex:1; justify-content:flex-end; align-items:center; }
+.chip{ background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:2px 9px; font-size:.76rem; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.chip.ok{ color:var(--ok); } .chip.warn{ color:var(--warn); } .chip.bad{ color:var(--bad); border-color:#7f1d1d; }
+.iconbtn{ background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:10px; min-width:40px; min-height:38px; font-size:1.05rem; }
+.iconbtn:disabled{ opacity:.35; }
+.iconbtn.active{ border-color:var(--accent); color:var(--accent); }
+
+main{ flex:1; display:flex; flex-direction:column; min-height:0; }
+#plotSec{ position:relative; height:clamp(170px,42%,480px); flex:0 0 auto; border-bottom:1px solid var(--border); background:var(--bg2); }
+#panelSec{ flex:1; min-height:0; display:flex; flex-direction:column; }
+@media (min-width:700px){
+  main{ flex-direction:row; }
+  #plotSec{ height:auto; flex:1.15; border-bottom:0; border-right:1px solid var(--border); }
+  #panelSec{ flex:1; }
+}
+#plot{ width:100%; height:100%; display:block; touch-action:none; user-select:none; -webkit-user-select:none; }
+#plotCtl{ position:absolute; top:8px; right:8px; display:flex; flex-direction:column; gap:6px; }
+#plotCtl button{ background:#1e293bcc; border:1px solid var(--border); color:var(--text); border-radius:10px; min-width:42px; min-height:42px; font-size:1rem; }
+#plotCtl button.off{ color:var(--muted); opacity:.6; }
+
+#tabs{ display:flex; flex:0 0 auto; border-bottom:1px solid var(--border); }
+#tabs button{ flex:1; background:none; border:none; color:var(--muted); padding:10px 0 8px; font-size:.9rem; border-bottom:2px solid transparent; }
+#tabs button.cur{ color:var(--text); border-bottom-color:var(--accent); }
+#panel{ flex:1; overflow-y:auto; padding:8px 10px 14px; overscroll-behavior:contain; }
+
+.rows{ display:flex; flex-direction:column; gap:6px; }
+.row{ display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:6px 8px; }
+.row.last{ border-color:var(--accent); }
+.pair{ font-weight:600; min-width:64px; font-size:.95rem; }
+.dedit{ width:86px; text-align:right; font-variant-numeric:tabular-nums; }
+.rchip{ margin-left:auto; font-size:.8rem; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.rchip.ok{ color:var(--ok); } .rchip.warn{ color:var(--warn); } .rchip.bad{ color:var(--bad); font-weight:700; } .rchip.na{ color:var(--muted); }
+.del{ background:none; border:none; color:var(--muted); font-size:1rem; min-width:38px; min-height:38px; border-radius:8px; }
+.del.armed{ color:#fff; background:var(--bad); }
+.hint{ color:var(--muted); font-size:.85rem; padding:8px 2px; line-height:1.5; }
+
+.mname{ background:var(--bg2); border:1px solid var(--border); color:var(--text); border-radius:8px; min-width:48px; min-height:40px; font-weight:700; font-size:1rem; }
+.mstat{ font-size:.68rem; border-radius:999px; padding:1px 7px; border:1px solid var(--border); white-space:nowrap; }
+.mstat.ok{ color:var(--ok); } .mstat.weak{ color:var(--warn); } .mstat.plan{ color:var(--muted); }
+.plan{ width:72px; font-size:.9rem; padding:5px 6px; text-align:right; }
+.mxy{ margin-left:auto; font-size:.76rem; color:var(--muted); font-variant-numeric:tabular-nums; text-align:right; line-height:1.3; }
+
+.chkrow .pred{ font-variant-numeric:tabular-nums; font-weight:600; }
+.chkrow .pm{ color:var(--muted); font-size:.8rem; font-variant-numeric:tabular-nums; }
+.chkrow button{ margin-left:auto; background:var(--surface2); border:1px solid var(--border); color:var(--cyan); border-radius:8px; min-height:38px; padding:0 14px; }
+
+h3{ font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:14px 0 6px; }
+.btnrow{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 4px; }
+.btnrow button{ background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 12px; font-size:.88rem; min-height:42px; }
+.btnrow button.danger{ color:var(--bad); border-color:#7f1d1d; }
+textarea{ width:100%; min-height:110px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; line-height:1.4; }
+
+footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(--surface); padding:0 8px calc(8px + env(safe-area-inset-bottom)); }
+#picker{ padding:8px 2px 2px; border-bottom:1px solid var(--border); margin-bottom:8px; }
+.chipgrid{ display:flex; flex-wrap:wrap; gap:6px; max-height:30dvh; overflow-y:auto; padding-bottom:8px; }
+.chip-m{ min-width:58px; min-height:48px; font-size:1.15rem; font-weight:700; background:var(--bg2); border:1px solid var(--border); color:var(--text); border-radius:10px; position:relative; padding:2px 10px; }
+.chip-m small{ position:absolute; top:1px; right:5px; font-size:.6rem; color:var(--muted); font-weight:400; }
+.chip-m.cur{ border-color:var(--accent); color:var(--accent); }
+.newmark{ display:flex; gap:6px; padding-bottom:8px; }
+.newmark input{ flex:1; min-width:0; }
+.newmark button{ background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:0 14px; min-height:44px; white-space:nowrap; }
+#touchEntry,#kbdEntry{ display:flex; gap:6px; align-items:stretch; padding-top:8px; }
+.pickbtn{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; background:var(--bg2); border:1px solid var(--border); border-radius:10px; min-height:54px; color:var(--text); padding:3px; min-width:0; }
+.pickbtn .pl{ font-size:.6rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+.pickbtn b{ font-size:1.3rem; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+.pickbtn.set b{ color:var(--accent); }
+#distIn{ flex:1.2; min-width:78px; width:100px; font-size:1.35rem; text-align:center; font-variant-numeric:tabular-nums; }
+#addBtn,#kbdAddBtn{ background:var(--accent); color:#0b1120; font-weight:800; font-size:1.5rem; border:none; border-radius:10px; min-width:58px; }
+.mini{ background:var(--bg2); border:1px solid var(--border); color:var(--muted); border-radius:10px; min-width:42px; font-size:1.05rem; }
+#kbdIn{ flex:1; min-width:0; font-family:ui-monospace,monospace; font-size:1.1rem; }
+#kbdSticky{ display:flex; align-items:center; padding:0 8px; color:var(--accent); font-weight:700; font-size:1.1rem; background:var(--bg2); border:1px solid var(--border); border-radius:10px; }
+
+#toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:calc(96px + env(safe-area-inset-bottom)); background:#111c31f0; border:1px solid var(--border); color:var(--text); padding:9px 14px; border-radius:10px; font-size:.9rem; z-index:50; max-width:92vw; transition:opacity .25s; pointer-events:none; }
+#toast.bad{ border-color:var(--bad); color:var(--bad); }
+#toast[hidden]{ display:none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Trilat <span class="ver">V1</span></h1>
+  <div id="stats"></div>
+  <button id="undoBtn" class="iconbtn" title="Undo last change">↩</button>
+  <button id="wakeBtn" class="iconbtn" title="Keep screen awake">☀</button>
+</header>
+
+<main>
+  <section id="plotSec">
+    <svg id="plot" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="plotCtl">
+      <button id="fitBtn" title="Fit view">⛶</button>
+      <button id="ellBtn" title="Error ellipse scale">±σ</button>
+      <button id="chkBtn" title="Toggle suggested checks">✓?</button>
+    </div>
+  </section>
+  <section id="panelSec">
+    <nav id="tabs">
+      <button data-tab="log">Log</button>
+      <button data-tab="marks">Marks</button>
+      <button data-tab="checks">Checks</button>
+      <button data-tab="data">Data</button>
+    </nav>
+    <div id="panel"></div>
+  </section>
+</main>
+
+<footer id="entry">
+  <div id="picker" hidden>
+    <div class="newmark">
+      <input id="newMarkIn" autocomplete="off" autocapitalize="characters" placeholder="">
+      <button id="newMarkBtn">+ new mark</button>
+    </div>
+    <div class="chipgrid" id="pickerChips"></div>
+  </div>
+  <div id="touchEntry">
+    <button id="fromBtn" class="pickbtn"><span class="pl">from</span><b id="fromVal">—</b></button>
+    <button id="swapBtn" class="mini" title="Swap">⇄</button>
+    <button id="toBtn" class="pickbtn"><span class="pl">to</span><b id="toVal">—</b></button>
+    <input id="distIn" inputmode="decimal" autocomplete="off" placeholder="m">
+    <button id="addBtn" title="Add measurement">＋</button>
+    <button id="kbdBtn" class="mini" title="Keyboard entry mode">⌨</button>
+  </div>
+  <div id="kbdEntry" hidden>
+    <span id="kbdSticky">—</span>
+    <input id="kbdIn" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="A B 12.34 · B 12.34 · 12.34">
+    <button id="kbdAddBtn">＋</button>
+    <button id="touchBtn" class="mini" title="Touch entry mode">☝</button>
+  </div>
+</footer>
+
+<div id="toast" hidden></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   Trilat Field Survey — distance-only (trilateration) survey logger with
+   live least-squares network adjustment. Port of trilat.py to the browser.
+   All data stays in this device's localStorage; nothing is uploaded.
+   ===================================================================== */
+
+/* ------------------------------------------------ tiny utils ------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function parseDist(s){ const v = parseFloat(String(s).trim().replace(',', '.')); return (isFinite(v) && v > 0) ? v : null; }
+function sanitizeName(s){ return String(s).trim().replace(/[^A-Za-z0-9_.\-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 12); }
+function vibrate(ms){ try{ navigator.vibrate && navigator.vibrate(ms); }catch(e){} }
+function pairKey(a, b){ return a < b ? a + '|' + b : b + '|' + a; }
+function niceVal(x){ const p = Math.pow(10, Math.floor(Math.log10(x))); const m = x / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; }
+function mulberry32(seed){ return function(){ seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function randn(rng){ let u = 0, v = 0; while(u === 0) u = rng(); while(v === 0) v = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+
+let toastTimer = null;
+function toast(msg, bad){
+  const t = $('toast');
+  t.textContent = msg; t.classList.toggle('bad', !!bad); t.hidden = false; t.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.hidden = true, 300); }, bad ? 3500 : 2200);
+}
+
+/* ------------------------------------------------ state ------------ */
+const LS_KEY = 'trilat-survey-v1';
+function defaultState(){
+  return { v: 1, marks: [], obs: [], nextId: 1,
+    ui: { from: '', to: '', dist: '', kbdDraft: '', kbd: false, tab: 'log',
+          showChecks: true, showEll: true, ellScale: 'auto', wake: false, lastObsId: 0 } };
+}
+function loadState(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LS_KEY));
+    if(s && s.v === 1 && Array.isArray(s.marks) && Array.isArray(s.obs)) return Object.assign(defaultState(), s, { ui: Object.assign(defaultState().ui, s.ui || {}) });
+  }catch(e){}
+  return null;
+}
+let state = loadState() || defaultState();
+let lastSaved = null, saveTimer = null;
+function save(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); lastSaved = new Date(); }
+  catch(e){ toast('SAVE FAILED: ' + e.message, true); }
+}
+function saveSoon(){ clearTimeout(saveTimer); saveTimer = setTimeout(save, 250); }
+
+const undoStack = [];
+function checkpoint(){
+  undoStack.push(JSON.stringify({ marks: state.marks, obs: state.obs, nextId: state.nextId }));
+  if(undoStack.length > 100) undoStack.shift();
+}
+function undo(){
+  const snap = undoStack.pop();
+  if(!snap){ toast('Nothing to undo'); return; }
+  const o = JSON.parse(snap);
+  state.marks = o.marks; state.obs = o.obs; state.nextId = o.nextId;
+  const names = new Set(state.marks.map(m => m.name));
+  if(!names.has(state.ui.from)) state.ui.from = '';
+  if(!names.has(state.ui.to)) state.ui.to = '';
+  afterMutate(); toast('Undone');
+}
+function afterMutate(){ save(); recompute(); renderAll(); }
+
+function markByName(n){ return state.marks.find(m => m.name === n); }
+function obsCount(n){ return state.obs.reduce((c, o) => c + (o.a === n || o.b === n ? 1 : 0), 0); }
+function nextName(){
+  const used = new Set(state.marks.map(m => m.name));
+  for(let i = 0; i < 702; i++){
+    const n = i < 26 ? String.fromCharCode(65 + i)
+                     : String.fromCharCode(65 + Math.floor(i / 26) - 1) + String.fromCharCode(65 + i % 26);
+    if(!used.has(n)) return n;
+  }
+  return 'M' + (state.marks.length + 1);
+}
+
+/* ------------------------------------------------ linear algebra --- */
+function dot(a, b){ let s = 0; for(let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+
+function solveLin(A, b){ // Gaussian elimination w/ partial pivoting; A rows are Float64Array (consumed)
+  const n = b.length, x = Float64Array.from(b), M = A;
+  for(let c = 0; c < n; c++){
+    let p = c, best = Math.abs(M[c][c]);
+    for(let r = c + 1; r < n; r++){ const v = Math.abs(M[r][c]); if(v > best){ best = v; p = r; } }
+    if(best < 1e-14) return null;
+    if(p !== c){ const t = M[p]; M[p] = M[c]; M[c] = t; const tb = x[p]; x[p] = x[c]; x[c] = tb; }
+    const piv = M[c][c];
+    for(let r = c + 1; r < n; r++){
+      const f = M[r][c] / piv; if(f === 0) continue;
+      for(let k = c; k < n; k++) M[r][k] -= f * M[c][k];
+      x[r] -= f * x[c];
+    }
+  }
+  for(let r = n - 1; r >= 0; r--){
+    let s = x[r];
+    for(let k = r + 1; k < n; k++) s -= M[r][k] * x[k];
+    x[r] = s / M[r][r];
+  }
+  return x;
+}
+
+function invMat(A){ // Gauss-Jordan inverse; A rows arrays; returns rows or null
+  const n = A.length;
+  const M = A.map((row, i) => { const r = new Float64Array(2 * n); r.set(row); r[n + i] = 1; return r; });
+  for(let c = 0; c < n; c++){
+    let p = c, best = Math.abs(M[c][c]);
+    for(let r = c + 1; r < n; r++){ const v = Math.abs(M[r][c]); if(v > best){ best = v; p = r; } }
+    if(best < 1e-12) return null;
+    if(p !== c){ const t = M[p]; M[p] = M[c]; M[c] = t; }
+    const piv = M[c][c];
+    for(let k = 0; k < 2 * n; k++) M[c][k] /= piv;
+    for(let r = 0; r < n; r++){
+      if(r === c) continue;
+      const f = M[r][c]; if(!f) continue;
+      for(let k = 0; k < 2 * n; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  return M.map(r => r.slice(n));
+}
+
+/* ------------------------------------------------ solver (trilat.py port) */
+function circleIntersect(x0, y0, r0, x1, y1, r1){
+  const dx = x1 - x0, dy = y1 - y0, d = Math.hypot(dx, dy);
+  if(d < 1e-9 || d > r0 + r1 || d < Math.abs(r0 - r1)) return null;
+  const a = (r0 * r0 - r1 * r1 + d * d) / (2 * d);
+  let h2 = r0 * r0 - a * a;
+  if(h2 < 0){ if(h2 < -1e-9) return null; h2 = 0; }
+  const h = Math.sqrt(h2);
+  const bx = x0 + a * dx / d, by = y0 + a * dy / d;
+  const ox = -dy * h / d, oy = dx * h / d;
+  return [[bx + ox, by + oy], [bx - ox, by - oy]];
+}
+
+function initialGuess(obs, order, rng){
+  const dist = new Map();
+  for(const o of obs){ dist.set(o.a + '|' + o.b, o.d); dist.set(o.b + '|' + o.a, o.d); }
+  const pos = new Map();
+  pos.set(order[0], [0, 0]);
+  const d01 = dist.get(order[0] + '|' + order[1]);
+  pos.set(order[1], [d01 != null ? d01 : 10.0, 0]);
+  let scale = 0; for(const o of obs) scale = Math.max(scale, o.d);
+  for(let i = 2; i < order.length; i++){
+    const name = order[i];
+    const placed = [...pos.keys()].filter(n => dist.has(name + '|' + n));
+    let found = null;
+    outer:
+    for(let j = 0; j < placed.length; j++) for(let k = j + 1; k < placed.length; k++){
+      const p0 = pos.get(placed[j]), p1 = pos.get(placed[k]);
+      const hit = circleIntersect(p0[0], p0[1], dist.get(name + '|' + placed[j]),
+                                  p1[0], p1[1], dist.get(name + '|' + placed[k]));
+      if(hit){ found = (pos.size === 2) ? (hit[0][1] >= hit[1][1] ? hit[0] : hit[1]) : hit[0]; break outer; }
+    }
+    pos.set(name, found || [(rng() * 2 - 1) * scale, (rng() * 2 - 1) * scale]);
+  }
+  return pos;
+}
+
+function pack(pos, order){
+  const v = new Float64Array(2 * order.length - 3);
+  v[0] = pos.get(order[1])[0];
+  for(let i = 2; i < order.length; i++){ const p = pos.get(order[i]); v[1 + 2 * (i - 2)] = p[0]; v[2 + 2 * (i - 2)] = p[1]; }
+  return v;
+}
+function unpack(v, order){
+  const pos = new Map();
+  pos.set(order[0], [0, 0]); pos.set(order[1], [v[0], 0]);
+  for(let i = 2; i < order.length; i++) pos.set(order[i], [v[1 + 2 * (i - 2)], v[2 + 2 * (i - 2)]]);
+  return pos;
+}
+function colsOf(i){ // parameter columns of mark #i in order, [[col, component], ...]
+  if(i === 0) return [];
+  if(i === 1) return [[0, 0]];
+  const b = 1 + 2 * (i - 2);
+  return [[b, 0], [b + 1, 1]];
+}
+
+function resJac(v, obs, order, idx){
+  const p = v.length, pos = unpack(v, order);
+  const r = new Float64Array(obs.length);
+  const J = obs.map(() => new Float64Array(p));
+  for(let k = 0; k < obs.length; k++){
+    const o = obs[k], pa = pos.get(o.a), pb = pos.get(o.b);
+    const dx = pb[0] - pa[0], dy = pb[1] - pa[1];
+    const calc = Math.hypot(dx, dy);
+    r[k] = o.d - calc;
+    if(calc < 1e-9) continue;
+    const u = [dx / calc, dy / calc];
+    for(const [col, comp] of colsOf(idx.get(o.b))) J[k][col] = -u[comp];
+    for(const [col, comp] of colsOf(idx.get(o.a))) J[k][col] = u[comp];
+  }
+  return { r, J };
+}
+
+function normalMatrix(J, m, p){
+  const N = [...Array(p)].map(() => new Float64Array(p));
+  for(let k = 0; k < m; k++){
+    const row = J[k];
+    for(let i = 0; i < p; i++){
+      const ji = row[i]; if(!ji) continue;
+      for(let j = i; j < p; j++) N[i][j] += ji * row[j];
+    }
+  }
+  for(let i = 0; i < p; i++) for(let j = 0; j < i; j++) N[i][j] = N[j][i];
+  return N;
+}
+
+function refine(v0, obs, order, idx){ // Levenberg-Marquardt
+  let v = Float64Array.from(v0), lam = 1e-4;
+  let { r, J } = resJac(v, obs, order, idx);
+  let cost = dot(r, r);
+  const p = v.length;
+  for(let it = 0; it < 150; it++){
+    const N = normalMatrix(J, obs.length, p);
+    const g = new Float64Array(p);
+    for(let k = 0; k < obs.length; k++){ const row = J[k]; for(let i = 0; i < p; i++) if(row[i]) g[i] += row[i] * r[k]; }
+    let accepted = false, stepNorm = 0;
+    for(let t = 0; t < 10; t++){
+      const A = N.map((row, i) => { const c = Float64Array.from(row); c[i] += lam; return c; });
+      const step = solveLin(A, g);
+      if(!step){ lam *= 10; continue; }
+      const v2 = Float64Array.from(v);
+      for(let i = 0; i < p; i++) v2[i] -= step[i];
+      const rj2 = resJac(v2, obs, order, idx);
+      const cost2 = dot(rj2.r, rj2.r);
+      if(cost2 <= cost + 1e-15){
+        stepNorm = Math.sqrt(dot(step, step));
+        v = v2; r = rj2.r; J = rj2.J; cost = cost2;
+        lam = Math.max(lam * 0.4, 1e-9); accepted = true; break;
+      }
+      lam *= 10;
+      if(lam > 1e10) return { v, cost };
+    }
+    if(!accepted) return { v, cost };
+    if(stepNorm < 1e-10) break;
+  }
+  return { v, cost };
+}
+
+function transformPlans(order, planMap){ // plan coords -> datum frame (order[0] at origin, order[1] on +X)
+  if(!planMap) return null;
+  const p0 = planMap.get(order[0]), p1 = planMap.get(order[1]);
+  if(!p0 || !p1) return null;
+  const bx = p1[0] - p0[0], by = p1[1] - p0[1];
+  const L = Math.hypot(bx, by);
+  if(L < 1e-9) return null;
+  const c = bx / L, s = by / L;
+  const out = new Map();
+  for(const [n, p] of planMap){
+    const qx = p[0] - p0[0], qy = p[1] - p0[1];
+    out.set(n, [c * qx + s * qy, -s * qx + c * qy]);
+  }
+  return out;
+}
+
+function applyFlip(v, order, tplans){ // resolve mirror ambiguity
+  if(order.length < 3) return v;
+  const flipped = Float64Array.from(v);
+  for(let i = 2; i < order.length; i++) flipped[2 + 2 * (i - 2)] *= -1;
+  if(tplans){
+    let sseI = 0, sseF = 0, any = false;
+    const posI = unpack(v, order), posF = unpack(flipped, order);
+    for(let i = 2; i < order.length; i++){
+      const q = tplans.get(order[i]); if(!q) continue;
+      any = true;
+      const a = posI.get(order[i]), b = posF.get(order[i]);
+      sseI += (a[0] - q[0]) ** 2 + (a[1] - q[1]) ** 2;
+      sseF += (b[0] - q[0]) ** 2 + (b[1] - q[1]) ** 2;
+    }
+    if(any) return sseF < sseI ? flipped : v;
+  }
+  for(let i = 2; i < order.length; i++){
+    const y = v[2 + 2 * (i - 2)];
+    if(Math.abs(y) > 1e-6) return y < 0 ? flipped : v;
+  }
+  return v;
+}
+
+function lsqSolve(obs, order, planMap){
+  const idx = new Map(order.map((n, i) => [n, i]));
+  const rng = mulberry32(0xB0BA);
+  let scale = 0; for(const o of obs) scale = Math.max(scale, o.d);
+  const tplans = transformPlans(order, planMap);
+  let best = null;
+  for(let t = 0; t < 22; t++){
+    const g = initialGuess(obs, order, rng);
+    if(t === 0 && tplans){ for(const [n, p] of tplans) if(g.has(n) && idx.get(n) >= 2) g.set(n, [p[0], p[1]]); }
+    if(t >= 2){
+      const s = scale * 0.15;
+      for(let i = 2; i < order.length; i++){
+        const p = g.get(order[i]);
+        g.set(order[i], [p[0] + randn(rng) * s, p[1] + randn(rng) * s]);
+      }
+    }
+    const { v, cost } = refine(pack(g, order), obs, order, idx);
+    if(!best || cost < best.cost) best = { v, cost };
+    if(best.cost < 1e-16) break;
+  }
+  return { v: applyFlip(best.v, order, tplans), cost: best.cost };
+}
+
+function determinedSet(order, obs){ // marks with enough geometry to be located (heuristic)
+  const nb = new Map(order.map(n => [n, new Set()]));
+  for(const o of obs){ if(nb.has(o.a) && nb.has(o.b)){ nb.get(o.a).add(o.b); nb.get(o.b).add(o.a); } }
+  const det = new Set([order[0]]);
+  let changed = true;
+  while(changed){
+    changed = false;
+    for(let i = 1; i < order.length; i++){
+      const n = order[i];
+      if(det.has(n)) continue;
+      const need = i === 1 ? 1 : 2;
+      let c = 0;
+      for(const m of nb.get(n)) if(det.has(m)) c++;
+      if(c >= need){ det.add(n); changed = true; }
+    }
+  }
+  return det;
+}
+
+/* ------------------------------------------------ solution --------- */
+let sol = null;
+function recompute(){
+  const t0 = performance.now();
+  const inObs = new Set();
+  state.obs.forEach(o => { inObs.add(o.a); inObs.add(o.b); });
+  const order = state.marks.map(m => m.name).filter(n => inObs.has(n));
+  sol = { order, pos: new Map(), det: new Set(), sigma: null, dof: null, nObsD: 0, unknownsD: 0,
+          res: new Map(), suspects: new Set(), covInfo: null, checks: [], solved: false, ms: 0, loo: null };
+  if(order.length < 2){ sol.ms = performance.now() - t0; return; }
+
+  const planMap = new Map();
+  for(const m of state.marks) if(m.px != null && m.py != null) planMap.set(m.name, [m.px, m.py]);
+
+  const { v } = lsqSolve(state.obs, order, planMap.size ? planMap : null);
+  const pos = unpack(v, order);
+  sol.pos = pos; sol.solved = true;
+  for(const o of state.obs){
+    const pa = pos.get(o.a), pb = pos.get(o.b);
+    sol.res.set(o.id, o.d - Math.hypot(pb[0] - pa[0], pb[1] - pa[1]));
+  }
+
+  const det = determinedSet(order, state.obs);
+  sol.det = det;
+  const orderD = order.filter(n => det.has(n));
+  if(orderD.length >= 2){
+    const obsD = state.obs.filter(o => det.has(o.a) && det.has(o.b));
+    const unknowns = 2 * orderD.length - 3;
+    const dof = obsD.length - unknowns;
+    sol.dof = dof; sol.nObsD = obsD.length; sol.unknownsD = unknowns;
+    let ss = 0;
+    for(const o of obsD){ const r = sol.res.get(o.id); ss += r * r; }
+    if(dof > 0){
+      sol.sigma = Math.sqrt(ss / dof);
+      // Robust suspect test: a gross blunder inflates the RMS sigma and can mask
+      // itself, so flag against a median-based sigma (with a 2 mm noise floor).
+      const absR = obsD.map(o => Math.abs(sol.res.get(o.id))).sort((a, b) => a - b);
+      const robust = 1.4826 * absR[Math.floor(absR.length / 2)];
+      const thr = 3 * Math.max(robust, 0.002);
+      for(const o of obsD) if(Math.abs(sol.res.get(o.id)) > thr) sol.suspects.add(o.id);
+      const idxD = new Map(orderD.map((n, i) => [n, i]));
+      const vD = pack(pos, orderD);
+      const { J } = resJac(vD, obsD, orderD, idxD);
+      const N = normalMatrix(J, obsD.length, vD.length);
+      const Ninv = invMat(N);
+      if(Ninv){
+        const s2 = sol.sigma * sol.sigma;
+        sol.covInfo = { orderD, idxD, C: Ninv.map(row => Array.from(row, x => x * s2)) };
+      }
+      // Leave-one-out blunder scan: a gross error smears its residual over the
+      // whole network, so instead re-solve without each measurement (warm-started
+      // from the full solution) and see if sigma collapses without one of them.
+      if(dof >= 2 && obsD.length <= 120){
+        let bestI = -1, bestSig = Infinity;
+        for(let i = 0; i < obsD.length; i++){
+          const reduced = obsD.filter((_, j) => j !== i);
+          if(determinedSet(orderD, reduced).size !== orderD.length) continue;
+          const { v: vR } = refine(vD, reduced, orderD, idxD);
+          const { r: rR } = resJac(vR, reduced, orderD, idxD);
+          const s = Math.sqrt(dot(rR, rR) / (reduced.length - unknowns));
+          if(s < bestSig){ bestSig = s; bestI = i; }
+        }
+        if(bestI >= 0 && bestSig < 0.5 * sol.sigma && sol.sigma - bestSig > 0.005){
+          sol.suspects.add(obsD[bestI].id);
+          sol.loo = { a: obsD[bestI].a, b: obsD[bestI].b, sigma: bestSig };
+        }
+      }
+    }
+    const seen = new Set(state.obs.map(o => pairKey(o.a, o.b)));
+    for(let i = 0; i < orderD.length; i++) for(let j = i + 1; j < orderD.length; j++){
+      const a = orderD[i], b = orderD[j];
+      if(seen.has(pairKey(a, b))) continue;
+      const pa = pos.get(a), pb = pos.get(b);
+      sol.checks.push({ a, b, d: Math.hypot(pb[0] - pa[0], pb[1] - pa[1]), sd: null });
+    }
+    for(const c of sol.checks) c.sd = pairSd(c.a, c.b);
+    sol.checks.sort((x, y) => x.d - y.d);
+  }
+  sol.ms = performance.now() - t0;
+}
+
+function colArr(name){ // [colX, colY] into covariance matrix, -1 = datum-fixed
+  const i = sol.covInfo.idxD.get(name);
+  if(i == null) return null;
+  const arr = [-1, -1];
+  for(const [col, comp] of colsOf(i)) arr[comp] = col;
+  return arr;
+}
+function markEllipse(name){ // 95% confidence error ellipse, metres
+  if(!sol.covInfo) return null;
+  const a = colArr(name); if(!a) return null;
+  const C = sol.covInfo.C, g = (i, j) => (i < 0 || j < 0) ? 0 : C[i][j];
+  const cxx = g(a[0], a[0]), cyy = g(a[1], a[1]), cxy = g(a[0], a[1]);
+  if(cxx === 0 && cyy === 0) return { semiA: 0, semiB: 0, theta: 0 };
+  const t = (cxx + cyy) / 2, dd = Math.sqrt(((cxx - cyy) / 2) ** 2 + cxy * cxy);
+  return { semiA: 2.4477 * Math.sqrt(Math.max(t + dd, 0)),
+           semiB: 2.4477 * Math.sqrt(Math.max(t - dd, 0)),
+           theta: 0.5 * Math.atan2(2 * cxy, cxx - cyy) };
+}
+function pairSd(a, b){ // 1-sigma uncertainty of the predicted a-b distance
+  if(!sol.covInfo) return null;
+  const ca = colArr(a), cb = colArr(b);
+  if(!ca || !cb) return null;
+  const C = sol.covInfo.C, g = (i, j) => (i < 0 || j < 0) ? 0 : C[i][j];
+  const pa = sol.pos.get(a), pb = sol.pos.get(b);
+  const dx = pb[0] - pa[0], dy = pb[1] - pa[1], L = Math.hypot(dx, dy);
+  if(L < 1e-9) return null;
+  const u = [dx / L, dy / L];
+  let vv = 0;
+  for(let i = 0; i < 2; i++) for(let j = 0; j < 2; j++){
+    vv += u[i] * u[j] * (g(ca[i], ca[j]) + g(cb[i], cb[j]) - g(ca[i], cb[j]) - g(cb[i], ca[j]));
+  }
+  return vv > 0 ? Math.sqrt(vv) : 0;
+}
+function planDisplay(){ // planned coords in the plot frame (aligned to solution when possible)
+  const planMap = new Map();
+  for(const m of state.marks) if(m.px != null && m.py != null) planMap.set(m.name, [m.px, m.py]);
+  if(sol && sol.solved){
+    const t = transformPlans(sol.order, planMap);
+    if(t) return t;
+  }
+  return planMap;
+}
+
+/* ------------------------------------------------ mutations -------- */
+function ensureMark(name){ if(!markByName(name)) state.marks.push({ name, px: null, py: null }); }
+
+function addObs(aRaw, bRaw, dRaw){
+  const a = sanitizeName(aRaw), b = sanitizeName(bRaw);
+  if(!a || !b){ toast('Pick FROM and TO marks first', true); return false; }
+  if(a === b){ toast('FROM and TO are the same mark', true); return false; }
+  const d = parseDist(dRaw);
+  if(d == null){ toast('Bad distance: "' + dRaw + '"', true); return false; }
+  checkpoint();
+  ensureMark(a); ensureMark(b);
+  const id = state.nextId++;
+  state.obs.push({ id, a, b, d });
+  state.ui.from = a; state.ui.to = ''; state.ui.dist = ''; state.ui.lastObsId = id;
+  vibrate(25);
+  afterMutate();
+  toast(a + ' – ' + b + ' = ' + d + ' m ✓');
+  return true;
+}
+
+function addMark(nameRaw, select){
+  const name = sanitizeName(nameRaw || nextName());
+  if(!name){ toast('Bad mark name', true); return null; }
+  if(!markByName(name)){ checkpoint(); state.marks.push({ name, px: null, py: null }); afterMutate(); }
+  if(select && pickerFor){ state.ui[pickerFor] = name; advancePicker(); }
+  return name;
+}
+
+function deleteObs(id){
+  checkpoint();
+  state.obs = state.obs.filter(o => o.id !== id);
+  afterMutate();
+}
+function editObs(id, dRaw){
+  const d = parseDist(dRaw);
+  if(d == null){ toast('Bad distance', true); renderPanel(); return; }
+  const o = state.obs.find(o => o.id === id);
+  if(!o || o.d === d) return;
+  checkpoint(); o.d = d; afterMutate();
+}
+function renameMark(oldName){
+  const raw = prompt('Rename mark "' + oldName + '" to:', oldName);
+  if(raw == null) return;
+  const nn = sanitizeName(raw);
+  if(!nn){ toast('Bad name', true); return; }
+  if(nn === oldName) return;
+  if(markByName(nn)){ toast('Name "' + nn + '" already exists', true); return; }
+  checkpoint();
+  markByName(oldName).name = nn;
+  for(const o of state.obs){ if(o.a === oldName) o.a = nn; if(o.b === oldName) o.b = nn; }
+  if(state.ui.from === oldName) state.ui.from = nn;
+  if(state.ui.to === oldName) state.ui.to = nn;
+  afterMutate();
+}
+function deleteMark(name){
+  const used = obsCount(name);
+  if(used && !confirm('Delete mark ' + name + ' and its ' + used + ' measurement(s)?')) return;
+  checkpoint();
+  state.marks = state.marks.filter(m => m.name !== name);
+  state.obs = state.obs.filter(o => o.a !== name && o.b !== name);
+  if(state.ui.from === name) state.ui.from = '';
+  if(state.ui.to === name) state.ui.to = '';
+  afterMutate();
+}
+function setPlan(name, comp, raw){
+  const m = markByName(name); if(!m) return;
+  const s = String(raw).trim();
+  let val = null;
+  if(s !== ''){
+    val = parseFloat(s.replace(',', '.'));
+    if(!isFinite(val)){ toast('Bad coordinate', true); renderPanel(); return; }
+  }
+  checkpoint();
+  if(comp === 'x') m.px = val; else m.py = val;
+  afterMutate();
+}
+function useCheck(a, b){
+  state.ui.from = a; state.ui.to = b;
+  saveSoon(); renderEntry(); renderPlot();
+  const di = $('distIn'); if(!state.ui.kbd && di) di.focus();
+  toast('Now measure ' + a + ' – ' + b);
+}
+
+/* ------------------------------------------------ import / export -- */
+function exportText(){
+  const L = ['# Trilat Field Survey V1 export',
+             '# ' + new Date().toISOString().slice(0, 16).replace('T', ' '),
+             '# format: trilat.py compatible; #!plan/#!mark lines carry the mark registry'];
+  for(const m of state.marks){
+    if(m.px != null && m.py != null) L.push('#!plan ' + m.name + ' ' + m.px + ' ' + m.py);
+    else L.push('#!mark ' + m.name);
+  }
+  for(const o of state.obs) L.push(o.a + ' ' + o.b + ' ' + o.d);
+  return L.join('\n') + '\n';
+}
+function parseImport(text){
+  const marks = [], obs = [], errs = [], names = new Set();
+  const addM = (n, px, py) => {
+    n = sanitizeName(n);
+    if(!n) return null;
+    if(!names.has(n)){ names.add(n); marks.push({ name: n, px: px ?? null, py: py ?? null }); }
+    else if(px != null){ const m = marks.find(m => m.name === n); m.px = px; m.py = py; }
+    return n;
+  };
+  text.split(/\r?\n/).forEach((raw, i) => {
+    let line = raw;
+    let m = line.match(/^#!plan\s+(\S+)\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s*$/);
+    if(m){
+      const x = parseFloat(m[2].replace(',', '.')), y = parseFloat(m[3].replace(',', '.'));
+      if(!isFinite(x) || !isFinite(y)) errs.push('line ' + (i + 1) + ': bad plan coords');
+      else addM(m[1], x, y);
+      return;
+    }
+    m = line.match(/^#!mark\s+(\S+)\s*$/);
+    if(m){ addM(m[1]); return; }
+    line = line.split('#')[0].trim();
+    if(!line) return;
+    const parts = line.split(/\s+/);
+    if(parts.length !== 3){ errs.push('line ' + (i + 1) + ': expected "FROM TO DIST"'); return; }
+    const d = parseDist(parts[2]);
+    if(d == null){ errs.push('line ' + (i + 1) + ': bad distance "' + parts[2] + '"'); return; }
+    const a = addM(parts[0]), b = addM(parts[1]);
+    if(!a || !b){ errs.push('line ' + (i + 1) + ': bad mark name'); return; }
+    if(a === b){ errs.push('line ' + (i + 1) + ': mark measured to itself'); return; }
+    obs.push({ a, b, d });
+  });
+  return { marks, obs, errs };
+}
+function doImport(text, replace){
+  const { marks, obs, errs } = parseImport(text);
+  if(errs.length){ toast('Import failed — ' + errs.slice(0, 2).join('; ') + (errs.length > 2 ? ' …' : ''), true); return; }
+  if(!marks.length && !obs.length){ toast('Nothing to import', true); return; }
+  checkpoint();
+  if(replace){
+    state.marks = marks;
+    state.obs = obs.map(o => ({ id: state.nextId++, ...o }));
+    state.ui.from = ''; state.ui.to = '';
+  }else{
+    for(const m of marks){
+      const ex = markByName(m.name);
+      if(!ex) state.marks.push(m);
+      else if(m.px != null && ex.px == null){ ex.px = m.px; ex.py = m.py; }
+    }
+    for(const o of obs) state.obs.push({ id: state.nextId++, ...o });
+  }
+  afterMutate();
+  toast('Imported ' + obs.length + ' measurements, ' + marks.length + ' marks');
+}
+function download(name, text, mime){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: mime || 'text/plain' }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function csvText(){
+  const L = ['mark,x,y'];
+  if(sol) for(const n of sol.order){ const p = sol.pos.get(n); L.push(n + ',' + p[0].toFixed(4) + ',' + p[1].toFixed(4)); }
+  return L.join('\n') + '\n';
+}
+
+/* ------------------------------------------------ plot ------------- */
+let view = null; // null = autofit; else {cx, cy, k} (world centre, px per metre)
+let plotW = 0, plotH = 0, plotQueued = false;
+
+function autofitView(){
+  const pts = [];
+  const ghost = planDisplay();
+  for(const m of state.marks){
+    if(sol && sol.pos.has(m.name)) pts.push(sol.pos.get(m.name));
+    else if(ghost.has(m.name)) pts.push(ghost.get(m.name));
+  }
+  if(!pts.length) return { cx: 0, cy: 0, k: 40 };
+  let minX = 1/0, maxX = -1/0, minY = 1/0, maxY = -1/0;
+  for(const p of pts){
+    minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+    minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+  }
+  const spanX = Math.max(maxX - minX, 0.5), spanY = Math.max(maxY - minY, 0.5);
+  const k = Math.min((plotW - 90) / spanX, (plotH - 90) / spanY);
+  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, k: Math.max(Math.min(k, 4000), 0.005) };
+}
+function curView(){ return view || autofitView(); }
+function W2S(p, v){ return [plotW / 2 + (p[0] - v.cx) * v.k, plotH / 2 - (p[1] - v.cy) * v.k]; }
+
+function ellipseExag(){
+  if(state.ui.ellScale !== 'auto') return state.ui.ellScale;
+  if(!sol || !sol.covInfo) return 1;
+  let mx = 0;
+  for(const n of sol.covInfo.orderD){ const e = markEllipse(n); if(e) mx = Math.max(mx, e.semiA); }
+  if(mx <= 0) return 1;
+  const v = curView();
+  return Math.max(1, niceVal((plotW / v.k) * 0.05 / mx));
+}
+
+function requestPlot(){
+  if(plotQueued) return;
+  plotQueued = true;
+  requestAnimationFrame(() => { plotQueued = false; renderPlot(); });
+}
+
+function renderPlot(){
+  const svg = $('plot');
+  plotW = svg.clientWidth; plotH = svg.clientHeight;
+  if(!plotW || !plotH) return;
+  const v = curView();
+  const el = [];
+  el.push('<rect width="100%" height="100%" fill="#0b1120"/>');
+
+  // ---- grid
+  const spanW = plotW / v.k, spanH = plotH / v.k;
+  const step = niceVal(Math.max(spanW, spanH) / 8);
+  const gx0 = Math.floor((v.cx - spanW / 2) / step) * step;
+  const gy0 = Math.floor((v.cy - spanH / 2) / step) * step;
+  for(let x = gx0; x <= v.cx + spanW / 2 + step / 2; x += step){
+    const sx = W2S([x, 0], v)[0];
+    const axis = Math.abs(x) < step * 1e-6;
+    el.push('<line x1="' + sx.toFixed(1) + '" y1="0" x2="' + sx.toFixed(1) + '" y2="' + plotH + '" stroke="' + (axis ? '#33415588' : '#1c2740') + '" stroke-width="1"/>');
+  }
+  for(let y = gy0; y <= v.cy + spanH / 2 + step / 2; y += step){
+    const sy = W2S([0, y], v)[1];
+    const axis = Math.abs(y) < step * 1e-6;
+    el.push('<line x1="0" y1="' + sy.toFixed(1) + '" x2="' + plotW + '" y2="' + sy.toFixed(1) + '" stroke="' + (axis ? '#33415588' : '#1c2740') + '" stroke-width="1"/>');
+  }
+
+  const ghost = planDisplay();
+
+  // ---- suggested check lines
+  if(state.ui.showChecks && sol) for(const c of sol.checks.slice(0, 8)){
+    const [x1, y1] = W2S(sol.pos.get(c.a), v), [x2, y2] = W2S(sol.pos.get(c.b), v);
+    el.push('<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="#155e75" stroke-width="1.5" stroke-dasharray="5 6"/>');
+    el.push('<line data-check="' + esc(c.a) + '|' + esc(c.b) + '" x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="rgba(0,0,0,0)" stroke-width="20"/>');
+    el.push('<text x="' + ((x1 + x2) / 2).toFixed(1) + '" y="' + ((y1 + y2) / 2 - 4).toFixed(1) + '" fill="#22d3ee" font-size="10" font-family="system-ui" text-anchor="middle" style="paint-order:stroke" stroke="#0b1120" stroke-width="3">' + c.d.toFixed(2) + '</text>');
+  }
+
+  // ---- measured lines
+  if(sol) for(const o of state.obs){
+    if(!sol.pos.has(o.a) || !sol.pos.has(o.b)) continue;
+    const [x1, y1] = W2S(sol.pos.get(o.a), v), [x2, y2] = W2S(sol.pos.get(o.b), v);
+    let stroke = '#64748b', width = 1.5;
+    if(sol.sigma){
+      const r = Math.abs(sol.res.get(o.id));
+      if(sol.suspects.has(o.id)){ stroke = '#f87171'; width = 2.5; }
+      else if(r > 2 * sol.sigma){ stroke = '#fbbf24'; width = 2; }
+    }
+    if(o.id === state.ui.lastObsId){ stroke = '#60a5fa'; width = 2.5; }
+    el.push('<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="' + stroke + '" stroke-width="' + width + '"/>');
+  }
+
+  // ---- error ellipses (95%, exaggerated)
+  let exag = 1;
+  if(state.ui.showEll && sol && sol.covInfo){
+    exag = ellipseExag();
+    for(const n of sol.covInfo.orderD){
+      const e = markEllipse(n);
+      if(!e || (e.semiA === 0 && e.semiB === 0)) continue;
+      const [sx, sy] = W2S(sol.pos.get(n), v);
+      const rx = Math.max(e.semiA * exag * v.k, 1);
+      const ry = Math.max(e.semiB * exag * v.k, 1);
+      const deg = (-e.theta * 180 / Math.PI).toFixed(2);
+      el.push('<ellipse transform="translate(' + sx.toFixed(1) + ' ' + sy.toFixed(1) + ') rotate(' + deg + ')" rx="' + rx.toFixed(1) + '" ry="' + ry.toFixed(1) + '" fill="rgba(96,165,250,0.13)" stroke="rgba(96,165,250,0.55)" stroke-width="1"/>');
+    }
+  }
+
+  // ---- planned-but-unmeasured marks (ghosts)
+  for(const m of state.marks){
+    if(sol && sol.pos.has(m.name)) continue;
+    const q = ghost.get(m.name);
+    if(!q) continue;
+    const [sx, sy] = W2S(q, v);
+    el.push('<rect data-mark="' + esc(m.name) + '" x="' + (sx - 6).toFixed(1) + '" y="' + (sy - 6).toFixed(1) + '" width="12" height="12" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3 3"/>');
+    el.push('<rect data-mark="' + esc(m.name) + '" x="' + (sx - 16).toFixed(1) + '" y="' + (sy - 16).toFixed(1) + '" width="32" height="32" fill="rgba(0,0,0,0)"/>');
+    el.push('<text x="' + (sx + 9).toFixed(1) + '" y="' + (sy - 9).toFixed(1) + '" fill="#94a3b8" font-size="13" font-family="system-ui" style="paint-order:stroke" stroke="#0b1120" stroke-width="3">' + esc(m.name) + '</text>');
+  }
+
+  // ---- solved marks
+  if(sol) for(let i = 0; i < sol.order.length; i++){
+    const name = sol.order[i];
+    const [sx, sy] = W2S(sol.pos.get(name), v);
+    const det = sol.det.has(name);
+    if(state.ui.from === name) el.push('<circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="12" fill="none" stroke="#4ade80" stroke-width="2"/>');
+    if(state.ui.to === name) el.push('<circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="12" fill="none" stroke="#f472b6" stroke-width="2"/>');
+    if(det){
+      el.push('<circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="6" fill="#60a5fa"' + (i < 2 ? ' stroke="#e2e8f0" stroke-width="1.5"' : '') + '/>');
+    }else{
+      el.push('<circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="6" fill="none" stroke="#fb923c" stroke-width="2" stroke-dasharray="2.5 2.5"/>');
+    }
+    el.push('<circle data-mark="' + esc(name) + '" cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="18" fill="rgba(0,0,0,0)"/>');
+    el.push('<text x="' + (sx + 9).toFixed(1) + '" y="' + (sy - 9).toFixed(1) + '" fill="' + (det ? '#e2e8f0' : '#fb923c') + '" font-size="14" font-weight="600" font-family="system-ui" style="paint-order:stroke" stroke="#0b1120" stroke-width="3">' + esc(name) + '</text>');
+  }
+
+  // ---- scale bar + legend
+  const bar = niceVal(spanW / 5);
+  const barPx = bar * v.k;
+  const bx1 = plotW - 14 - barPx, by = plotH - 16;
+  el.push('<line x1="' + bx1.toFixed(1) + '" y1="' + by + '" x2="' + (plotW - 14) + '" y2="' + by + '" stroke="#94a3b8" stroke-width="2"/>');
+  el.push('<line x1="' + bx1.toFixed(1) + '" y1="' + (by - 4) + '" x2="' + bx1.toFixed(1) + '" y2="' + (by + 4) + '" stroke="#94a3b8" stroke-width="2"/>');
+  el.push('<line x1="' + (plotW - 14) + '" y1="' + (by - 4) + '" x2="' + (plotW - 14) + '" y2="' + (by + 4) + '" stroke="#94a3b8" stroke-width="2"/>');
+  el.push('<text x="' + (bx1 + barPx / 2).toFixed(1) + '" y="' + (by - 7) + '" fill="#94a3b8" font-size="11" font-family="system-ui" text-anchor="middle">' + (bar < 1 ? (bar * 100).toFixed(0) + ' cm' : bar + ' m') + '</text>');
+
+  const leg = [];
+  if(sol && sol.sigma != null) leg.push('σ ' + (sol.sigma * 1000).toFixed(1) + ' mm');
+  if(sol && sol.dof != null) leg.push('redundancy ' + sol.dof);
+  if(state.ui.showEll && sol && sol.covInfo) leg.push('ellipses 95% ×' + exag);
+  if(leg.length) el.push('<text x="10" y="' + (plotH - 10) + '" fill="#64748b" font-size="11" font-family="system-ui">' + esc(leg.join(' · ')) + '</text>');
+
+  svg.innerHTML = el.join('');
+}
+
+/* ---- plot gestures: pan / pinch / wheel / tap ---- */
+(function(){
+  const svg = $('plot');
+  const pointers = new Map();
+  let pinch = null, down = null, moved = false;
+
+  svg.addEventListener('pointerdown', e => {
+    svg.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if(pointers.size === 1){ down = { x: e.clientX, y: e.clientY, t: Date.now() }; moved = false; }
+    if(pointers.size === 2){
+      const [p1, p2] = [...pointers.values()];
+      pinch = { d: Math.hypot(p1.x - p2.x, p1.y - p2.y),
+                mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
+                view: { ...curView() } };
+    }
+    e.preventDefault();
+  });
+  svg.addEventListener('pointermove', e => {
+    const prev = pointers.get(e.pointerId);
+    if(!prev) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if(pointers.size === 1 && down){
+      if(Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) moved = true;
+      if(moved){
+        if(!view) view = { ...curView() };
+        view.cx -= (e.clientX - prev.x) / view.k;
+        view.cy += (e.clientY - prev.y) / view.k;
+        requestPlot();
+      }
+    }else if(pointers.size === 2 && pinch){
+      moved = true;
+      const [p1, p2] = [...pointers.values()];
+      const d = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      const sv = pinch.view;
+      const rect = svg.getBoundingClientRect();
+      const k = Math.max(0.005, Math.min(4000, sv.k * (d / Math.max(pinch.d, 1))));
+      const wx = sv.cx + (pinch.mid.x - rect.left - plotW / 2) / sv.k;
+      const wy = sv.cy - (pinch.mid.y - rect.top - plotH / 2) / sv.k;
+      view = { k, cx: wx - (mid.x - rect.left - plotW / 2) / k, cy: wy + (mid.y - rect.top - plotH / 2) / k };
+      requestPlot();
+    }
+  });
+  function up(e){
+    pointers.delete(e.pointerId);
+    if(pointers.size < 2) pinch = null;
+    if(pointers.size === 0 && down && !moved && Date.now() - down.t < 600){
+      const t = e.target.closest ? (e.target.closest('[data-mark]') || e.target.closest('[data-check]')) : null;
+      if(t && t.dataset.mark) tapMark(t.dataset.mark);
+      else if(t && t.dataset.check){ const [a, b] = t.dataset.check.split('|'); useCheck(a, b); }
+    }
+    if(pointers.size === 0) down = null;
+  }
+  svg.addEventListener('pointerup', up);
+  svg.addEventListener('pointercancel', up);
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const v = { ...curView() };
+    const rect = svg.getBoundingClientRect();
+    const f = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+    const k = Math.max(0.005, Math.min(4000, v.k * f));
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const wx = v.cx + (mx - plotW / 2) / v.k, wy = v.cy - (my - plotH / 2) / v.k;
+    view = { k, cx: wx - (mx - plotW / 2) / k, cy: wy + (my - plotH / 2) / k };
+    requestPlot();
+  }, { passive: false });
+  svg.addEventListener('dblclick', () => { view = null; requestPlot(); });
+})();
+
+function tapMark(name){
+  const ui = state.ui;
+  if(!ui.from || (ui.from && ui.to)){ ui.from = name; ui.to = ''; }
+  else if(name !== ui.from){ ui.to = name; if(!ui.kbd) $('distIn').focus(); }
+  else ui.from = '';
+  vibrate(15); saveSoon(); renderEntry(); requestPlot();
+}
+
+/* ------------------------------------------------ panels ----------- */
+function statusOf(name){
+  const cnt = obsCount(name);
+  if(cnt === 0) return ['plan', 'planned'];
+  if(sol && sol.det.has(name)) return ['ok', 'ok'];
+  return ['weak', 'weak'];
+}
+
+function renderStats(){
+  const nM = state.marks.length, nO = state.obs.length;
+  let out = '<span class="chip">' + nM + ' marks</span><span class="chip">' + nO + ' meas</span>';
+  if(sol && sol.dof != null){
+    const cls = sol.dof < 0 ? 'bad' : sol.dof === 0 ? 'warn' : 'ok';
+    out += '<span class="chip ' + cls + '" title="redundancy">red ' + sol.dof + '</span>';
+  }
+  if(sol && sol.sigma != null)
+    out += '<span class="chip ' + (sol.suspects.size ? 'bad' : 'ok') + '">σ ' + (sol.sigma * 1000).toFixed(1) + 'mm</span>';
+  const weak = sol ? sol.order.filter(n => !sol.det.has(n)).length : 0;
+  if(weak) out += '<span class="chip warn">' + weak + ' weak</span>';
+  if(sol && sol.suspects.size) out += '<span class="chip bad">⚠ ' + sol.suspects.size + '</span>';
+  $('stats').innerHTML = out;
+}
+
+function renderLog(){
+  if(!state.obs.length) return '<div class="hint">No measurements yet.<br>Tap <b>FROM</b>/<b>TO</b> below to pick or create marks, type the taped distance in metres, hit <b>＋</b>. Everything autosaves on this device.</div>';
+  const rows = [...state.obs].reverse().map(o => {
+    const r = sol ? sol.res.get(o.id) : null;
+    let chip = '<span class="rchip na">·</span>';
+    if(r != null && sol.sigma != null && sol.det.has(o.a) && sol.det.has(o.b)){
+      const cls = sol.suspects.has(o.id) ? 'bad' : Math.abs(r) > 2 * sol.sigma ? 'warn' : 'ok';
+      chip = '<span class="rchip ' + cls + '">' + (sol.suspects.has(o.id) ? '⚠ ' : '') + (r * 1000 >= 0 ? '+' : '') + (r * 1000).toFixed(1) + ' mm</span>';
+    }
+    return '<div class="row' + (o.id === state.ui.lastObsId ? ' last' : '') + '">' +
+      '<span class="pair">' + esc(o.a) + ' – ' + esc(o.b) + '</span>' +
+      '<input class="dedit" data-oid="' + o.id + '" value="' + o.d + '" inputmode="decimal" autocomplete="off">' +
+      chip +
+      '<button class="del" data-del="' + o.id + '">✕</button></div>';
+  }).join('');
+  let head = '';
+  if(sol && sol.loo)
+    head += '<div class="hint" style="color:var(--bad)">⚠ Dropping <b>' + esc(sol.loo.a) + ' – ' + esc(sol.loo.b) + '</b> alone would cut σ from ' + (sol.sigma * 1000).toFixed(1) + ' to ' + (sol.loo.sigma * 1000).toFixed(1) + ' mm — remeasure it first.</div>';
+  else if(sol && sol.suspects.size)
+    head += '<div class="hint" style="color:var(--bad)">⚠ ' + sol.suspects.size + ' measurement(s) have residuals far out of family — remeasure them.</div>';
+  return head + '<div class="rows">' + rows + '</div>';
+}
+
+function renderMarks(){
+  const rows = state.marks.map(m => {
+    const [cls, label] = statusOf(m.name);
+    let xy = '·';
+    if(sol && sol.pos.has(m.name) && sol.det.has(m.name)){
+      const p = sol.pos.get(m.name);
+      xy = p[0].toFixed(3) + '<br>' + p[1].toFixed(3);
+    }
+    return '<div class="row">' +
+      '<button class="mname" data-ren="' + esc(m.name) + '">' + esc(m.name) + '</button>' +
+      '<span class="mstat ' + cls + '">' + label + '</span>' +
+      '<input class="plan" data-plan="' + esc(m.name) + '|x" value="' + (m.px ?? '') + '" placeholder="plan x" autocomplete="off">' +
+      '<input class="plan" data-plan="' + esc(m.name) + '|y" value="' + (m.py ?? '') + '" placeholder="plan y" autocomplete="off">' +
+      '<span class="mxy">' + xy + '</span>' +
+      '<button class="del" data-delmark="' + esc(m.name) + '">✕</button></div>';
+  }).join('');
+  return '<div class="btnrow"><input id="addMarkIn" placeholder="' + esc(nextName()) + '" autocapitalize="characters" autocomplete="off" style="flex:1;min-width:0"><button id="addMarkBtn">+ add mark</button></div>' +
+    '<div class="rows">' + (rows || '') + '</div>' +
+    '<div class="hint">Pre-plan here at home: add marks and optional sketch coordinates (metres; any local frame — the first mark becomes the origin, the second sets the +X direction). Planned marks show as dashed squares on the map until measurements place them. Tap a name to rename.</div>';
+}
+
+function renderChecks(){
+  if(!sol || !sol.solved) return '<div class="hint">Add measurements first.</div>';
+  let head = '<div class="hint">';
+  head += 'Network: ' + sol.order.length + ' marks in use, ' + state.obs.length + ' measurements, ' +
+          (sol.unknownsD || '—') + ' unknowns, redundancy <b>' + (sol.dof ?? '—') + '</b>. ';
+  if(sol.dof != null){
+    if(sol.dof < 0) head += '<span style="color:var(--bad)">UNDERDETERMINED — add measurements.</span>';
+    else if(sol.dof === 0) head += '<span style="color:var(--warn)">No spare measurements — nothing is cross-checked yet. Shoot a pair below.</span>';
+    else head += 'σ = ' + (sol.sigma * 1000).toFixed(1) + ' mm (RMS of residuals).';
+  }
+  const weakList = sol.order.filter(n => !sol.det.has(n));
+  if(weakList.length) head += '<br><span style="color:var(--warn)">Weak marks (need more distances): ' + weakList.map(esc).join(', ') + '</span>';
+  head += '<br><small>Solved in ' + sol.ms.toFixed(0) + ' ms.</small></div>';
+
+  if(!sol.checks.length) return head + '<div class="hint">Every pair is measured — nothing left to check.</div>';
+  const rows = sol.checks.map(c =>
+    '<div class="row chkrow"><span class="pair">' + esc(c.a) + ' – ' + esc(c.b) + '</span>' +
+    '<span class="pred">' + c.d.toFixed(3) + ' m</span>' +
+    (c.sd != null ? '<span class="pm">±' + (1.96 * c.sd * 1000).toFixed(1) + ' mm</span>' : '') +
+    '<button data-use="' + esc(c.a) + '|' + esc(c.b) + '">use</button></div>').join('');
+  return head + '<h3>Unmeasured pairs — shoot one, compare with prediction</h3><div class="rows">' + rows + '</div>';
+}
+
+function renderData(){
+  const saved = lastSaved ? lastSaved.toLocaleTimeString() : '—';
+  return '<h3>Export</h3>' +
+    '<textarea id="exportTa" readonly>' + esc(exportText()) + '</textarea>' +
+    '<div class="btnrow">' +
+    '<button id="copyBtn">Copy</button>' +
+    '<button id="dlTxtBtn">Download .txt</button>' +
+    (navigator.share ? '<button id="shareBtn">Share…</button>' : '') +
+    '<button id="dlCsvBtn">Coords .csv</button>' +
+    '<button id="dlSvgBtn">Sketch .svg</button></div>' +
+    '<div class="hint">The .txt is compatible with <code>trilat.py</code> (the <code>#!</code> lines are comments to it). Autosaved to this browser\'s localStorage on every change — last save ' + esc(saved) + '.</div>' +
+    '<h3>Import</h3>' +
+    '<textarea id="importTa" placeholder="# paste a measurement file&#10;A B 12.345&#10;A C 9.87"></textarea>' +
+    '<div class="btnrow">' +
+    '<button id="impReplBtn">Import (replace all)</button>' +
+    '<button id="impAppBtn">Import (append)</button>' +
+    '<button id="impFileBtn">Load file…</button>' +
+    '<input type="file" id="impFile" accept=".txt,.dat,text/plain" hidden></div>' +
+    '<h3>Danger zone</h3>' +
+    '<div class="btnrow">' +
+    '<button id="clearObsBtn" class="danger">Clear measurements (keep marks)</button>' +
+    '<button id="wipeBtn" class="danger">Wipe everything</button></div>';
+}
+
+function renderPanel(){
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('cur', b.dataset.tab === state.ui.tab));
+  const t = state.ui.tab;
+  $('panel').innerHTML = t === 'log' ? renderLog() : t === 'marks' ? renderMarks() : t === 'checks' ? renderChecks() : renderData();
+}
+
+function renderEntry(){
+  const ui = state.ui;
+  $('touchEntry').hidden = ui.kbd;
+  $('kbdEntry').hidden = !ui.kbd;
+  $('fromVal').textContent = ui.from || '—';
+  $('toVal').textContent = ui.to || '—';
+  $('fromBtn').classList.toggle('set', !!ui.from);
+  $('toBtn').classList.toggle('set', !!ui.to);
+  $('kbdSticky').textContent = (ui.from || '·') + (ui.to ? '–' + ui.to : '') + ' →';
+  const di = $('distIn');
+  if(document.activeElement !== di) di.value = ui.dist;
+  const ki = $('kbdIn');
+  if(document.activeElement !== ki) ki.value = ui.kbdDraft;
+  $('undoBtn').disabled = !undoStack.length;
+  $('wakeBtn').classList.toggle('active', !!ui.wake);
+  $('ellBtn').classList.toggle('off', !ui.showEll);
+  $('ellBtn').textContent = ui.ellScale === 'auto' ? '±σ' : '×' + ui.ellScale;
+  $('chkBtn').classList.toggle('off', !ui.showChecks);
+}
+
+function renderAll(){ renderStats(); renderEntry(); renderPanel(); requestPlot(); }
+
+/* ------------------------------------------------ picker ----------- */
+let pickerFor = null;
+function openPicker(which){
+  pickerFor = which;
+  renderPicker();
+  $('picker').hidden = false;
+}
+function closePicker(){ pickerFor = null; $('picker').hidden = true; }
+function advancePicker(){
+  saveSoon(); renderEntry(); requestPlot();
+  if(pickerFor === 'from' && !state.ui.to){ pickerFor = 'to'; renderPicker(); }
+  else { closePicker(); if(!state.ui.kbd) $('distIn').focus(); }
+}
+function renderPicker(){
+  const cur = state.ui[pickerFor];
+  $('pickerChips').innerHTML = state.marks.map(m =>
+    '<button class="chip-m' + (m.name === cur ? ' cur' : '') + '" data-pick="' + esc(m.name) + '">' + esc(m.name) + '<small>' + obsCount(m.name) + '</small></button>'
+  ).join('') || '<div class="hint">No marks yet — add your first one above.</div>';
+  const ni = $('newMarkIn');
+  ni.value = ''; ni.placeholder = nextName() + '  (' + (pickerFor === 'from' ? 'FROM' : 'TO') + ')';
+}
+
+/* ------------------------------------------------ events ----------- */
+$('fromBtn').addEventListener('click', () => pickerFor === 'from' ? closePicker() : openPicker('from'));
+$('toBtn').addEventListener('click', () => pickerFor === 'to' ? closePicker() : openPicker('to'));
+$('swapBtn').addEventListener('click', () => {
+  const t = state.ui.from; state.ui.from = state.ui.to; state.ui.to = t;
+  saveSoon(); renderEntry(); requestPlot();
+});
+$('picker').addEventListener('click', e => {
+  const b = e.target.closest('[data-pick]');
+  if(b){ state.ui[pickerFor] = b.dataset.pick; vibrate(15); advancePicker(); }
+});
+$('newMarkBtn').addEventListener('click', () => addMark($('newMarkIn').value, true));
+$('newMarkIn').addEventListener('keydown', e => { if(e.key === 'Enter') addMark($('newMarkIn').value, true); });
+
+$('addBtn').addEventListener('click', () => addObs(state.ui.from, state.ui.to, $('distIn').value));
+$('distIn').addEventListener('input', () => { state.ui.dist = $('distIn').value; saveSoon(); });
+$('distIn').addEventListener('keydown', e => { if(e.key === 'Enter') addObs(state.ui.from, state.ui.to, $('distIn').value); });
+
+$('kbdBtn').addEventListener('click', () => { state.ui.kbd = true; save(); renderEntry(); closePicker(); $('kbdIn').focus(); });
+$('touchBtn').addEventListener('click', () => { state.ui.kbd = false; save(); renderEntry(); });
+function kbdAdd(){
+  const raw = $('kbdIn').value.trim();
+  if(!raw) return;
+  const t = raw.split(/\s+/);
+  let a, b, d;
+  if(t.length >= 3){ a = t[0]; b = t[1]; d = t[2]; }
+  else if(t.length === 2){ a = state.ui.from; b = t[0]; d = t[1]; if(!a){ toast('No sticky FROM yet — use "A B 12.34"', true); return; } }
+  else { a = state.ui.from; b = state.ui.to; d = t[0]; if(!a || !b){ toast('No sticky pair — use "A B 12.34"', true); return; } }
+  if(addObs(a, b, d)){ state.ui.kbdDraft = ''; $('kbdIn').value = ''; $('kbdIn').focus(); }
+}
+$('kbdAddBtn').addEventListener('click', kbdAdd);
+$('kbdIn').addEventListener('keydown', e => { if(e.key === 'Enter') kbdAdd(); });
+$('kbdIn').addEventListener('input', () => { state.ui.kbdDraft = $('kbdIn').value; saveSoon(); });
+
+$('undoBtn').addEventListener('click', undo);
+$('fitBtn').addEventListener('click', () => { view = null; requestPlot(); });
+$('chkBtn').addEventListener('click', () => { state.ui.showChecks = !state.ui.showChecks; save(); renderEntry(); requestPlot(); });
+$('ellBtn').addEventListener('click', () => {
+  const seq = ['auto', 1, 10, 25, 50, 100];
+  const ui = state.ui;
+  if(!ui.showEll){ ui.showEll = true; ui.ellScale = 'auto'; }
+  else{
+    const i = seq.indexOf(ui.ellScale);
+    if(i === seq.length - 1){ ui.showEll = false; ui.ellScale = 'auto'; }
+    else ui.ellScale = seq[i + 1];
+  }
+  save(); renderEntry(); requestPlot();
+  toast(ui.showEll ? ('Error ellipses: ' + (ui.ellScale === 'auto' ? 'auto scale' : '×' + ui.ellScale)) : 'Error ellipses off');
+});
+
+document.querySelectorAll('#tabs button').forEach(b =>
+  b.addEventListener('click', () => { state.ui.tab = b.dataset.tab; save(); renderPanel(); }));
+
+/* panel event delegation */
+let armedDel = null, armedTimer = null;
+$('panel').addEventListener('click', e => {
+  const del = e.target.closest('[data-del]');
+  if(del){
+    const id = +del.dataset.del;
+    if(armedDel === 'o' + id){ armedDel = null; clearTimeout(armedTimer); deleteObs(id); }
+    else{
+      armedDel = 'o' + id; del.classList.add('armed'); del.textContent = 'sure?';
+      clearTimeout(armedTimer);
+      armedTimer = setTimeout(() => { armedDel = null; renderPanel(); }, 2500);
+    }
+    return;
+  }
+  const dm = e.target.closest('[data-delmark]');
+  if(dm){
+    const n = dm.dataset.delmark;
+    if(obsCount(n)) deleteMark(n); // confirm() inside
+    else if(armedDel === 'm' + n){ armedDel = null; clearTimeout(armedTimer); deleteMark(n); }
+    else{
+      armedDel = 'm' + n; dm.classList.add('armed'); dm.textContent = 'sure?';
+      clearTimeout(armedTimer);
+      armedTimer = setTimeout(() => { armedDel = null; renderPanel(); }, 2500);
+    }
+    return;
+  }
+  const ren = e.target.closest('[data-ren]');
+  if(ren){ renameMark(ren.dataset.ren); return; }
+  const use = e.target.closest('[data-use]');
+  if(use){ const [a, b] = use.dataset.use.split('|'); useCheck(a, b); return; }
+  switch(e.target.id){
+    case 'addMarkBtn': { const v = $('addMarkIn').value; addMark(v); break; }
+    case 'copyBtn':
+      navigator.clipboard.writeText(exportText()).then(() => toast('Copied'), () => toast('Copy failed', true));
+      break;
+    case 'dlTxtBtn': download('survey.txt', exportText()); break;
+    case 'shareBtn': navigator.share({ title: 'Trilat survey', text: exportText() }).catch(() => {}); break;
+    case 'dlCsvBtn': download('coords.csv', csvText(), 'text/csv'); break;
+    case 'dlSvgBtn': download('sketch.svg', new XMLSerializer().serializeToString($('plot')), 'image/svg+xml'); break;
+    case 'impReplBtn': doImport($('importTa').value, true); break;
+    case 'impAppBtn': doImport($('importTa').value, false); break;
+    case 'impFileBtn': $('impFile').click(); break;
+    case 'clearObsBtn':
+      if(confirm('Delete ALL measurements (marks and plans stay)?')){ checkpoint(); state.obs = []; state.ui.from = ''; state.ui.to = ''; afterMutate(); }
+      break;
+    case 'wipeBtn':
+      if(confirm('Wipe EVERYTHING — marks, plans and measurements? Export first if unsure.')){ checkpoint(); const ui = state.ui; state = defaultState(); state.ui = ui; state.ui.from = ''; state.ui.to = ''; afterMutate(); }
+      break;
+  }
+});
+$('panel').addEventListener('change', e => {
+  if(e.target.classList.contains('dedit')) editObs(+e.target.dataset.oid, e.target.value);
+  else if(e.target.classList.contains('plan')){
+    const [name, comp] = e.target.dataset.plan.split('|');
+    setPlan(name, comp, e.target.value);
+  }
+  else if(e.target.id === 'impFile' && e.target.files[0]){
+    e.target.files[0].text().then(t => { const ta = $('importTa'); if(ta) ta.value = t; toast('File loaded — now Import'); });
+  }
+});
+$('panel').addEventListener('keydown', e => {
+  if(e.key === 'Enter' && e.target.id === 'addMarkIn') addMark(e.target.value);
+});
+
+/* ------------------------------------------------ wake lock -------- */
+let wakeLock = null;
+async function acquireWake(){
+  try{
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  }catch(e){ /* not granted / unsupported */ }
+}
+$('wakeBtn').addEventListener('click', async () => {
+  state.ui.wake = !state.ui.wake;
+  if(state.ui.wake){
+    if(!('wakeLock' in navigator)){ toast('Wake lock not supported here', true); state.ui.wake = false; }
+    else{ await acquireWake(); toast(wakeLock ? 'Screen will stay on' : 'Wake lock refused', !wakeLock); if(!wakeLock) state.ui.wake = false; }
+  }else{
+    if(wakeLock) wakeLock.release();
+    toast('Screen may sleep again');
+  }
+  save(); renderEntry();
+});
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden) save();
+  else if(state.ui.wake && !wakeLock) acquireWake();
+});
+window.addEventListener('pagehide', save);
+
+/* ------------------------------------------------ PWA bits --------- */
+const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAAGPklEQVR42u3dP24kRRiGcW9rAjJCC4kTEBE6ssMNweleYiUOYolLkLKEhHbk0IdAWnEDMgiskQbLM9M9XV1VX32/J0IyM6Odfp/+3pr+9+Hb6x/+vQKSMvkKQACAAAABAAIABAAIABAAIABAAIAAAAEAAgAEAAgAEAAgAEAAgAAAAQACAAQACAAQACAAQACAAAABAAIABAAqsvMVjMf9w8vRv/3+y4++oAM+eD7A+KEngwok/AVfRwCEDz8JCJA+/CQgQPrwZ5eAAMKfWgICCH9qCQgAi2CAAEhffzLWIALABAAIABAAIABAAIAA6IqvXz5X+ZxM1wm4IiwAN7d3vgQCCD7K45LIgMH/7udf1R8C5N7jbyFBxmuEVaBgwX9+enx9zdXnohJkvUDeBAgW/LevKyFB5rtDmACBgv8eX7+smwTZb41CgGDBf+89LpWg1nEFAgh+kT3+qfc53JOfOp9f6AkQsuqceq+3rz1WaxxXIEC44G/9+pvbu9XvQQBsGvxj75s5uARIsscvWVuenx7VIALEqTpLer8aRIAhO77qQ4CUwd+q96tBAwqw9RNRau/xWwQ0aw3ajRj6Y//fUhlaVJ1avR+vhDwZbs2dy+ZI0Krj1wz/e5+VUbApU/jPvf7m9m52+J+fHqsFptbnZFwbhJoAJe9ZeTgJWv+qs+Wi1xQYZA2wxRNRlpwYVjuIrci2GJ4yhn/PnFOIt646Fr0EaBL+cxLU7Pitwk8wN8ZqGvxeT3LLtBh2JLhR6ByNNQGa158la4FRe3/2GqQCdVQvegpjlglFgKQVDAToZq/aOvyZ5SOASpG6BhFA71eBoHpkFbFrAWrdtm/Lz4l+R4fRa5AJsOFGdrCLAGkliNj7l9yPlACD1KDDU6KXXBCjaxMgvATHrgdYK0Hk3p9N0DAVqLQE597v0mkwal0Y9d8Vag1QSoL9+8zZ2y0Rwe/9BOhegrevn3v+/zkJRgq/SyIHleDU60pPgxHDNGINCv2QvP0GOXU+/yWyLLk1SvRF74gL+XQCbLWB1u7xooclw21THAjbKMCj9ujRahABZgR5aZj94kMAIiSfgAQYdINt9WuRGkSAEBthyeeOLgIBknFpmCNLMHoNIoBalLoGEWDlBt+Hv9QpFSBA6L3dHBGiTYORL5SZRglk7QdXnPtMvxYRIH3vH6kWjboYJsCK3m+RHL8GEaDShl0yDdQiAnQb/hJPao9ai0asQdMI4Yz4rN6RpkHkiWUCNNz7qUUEGHLRO3ItckGMRW/TcPU6DaJOKAJc9ffMLrWIAE0WwD2N+55r0Ug1KP0E6P3uB5GmQcSJNAl//6hFBBi690esRaPUIIvggBu252kQbQKFEaDkAniEu571MA1GmALpJsBoHbnHC3AifceT8I+xN7NIJkDa8LesRdG/u/SL4BFP8e1hGkSZNCEEWLsAznKr70unQeZaNPwEyN55a9SiyDuSKWv43eh2+2kQYeeTcg2Q9fblalEiATL2/pa1KOr32v0jki5ZAKs+5WvKJcKUfnbbFuz0ftNgjgj7v5/7Dk+F/pD7h5cuZJiEH6Vq0dzwn5KBABa93X9X7y2S14a4lQTDCGDR224alApvCwmmiBtnza8VKCtC6dDWlqBrAeYEW+9vV4su7fw9STBl22goMw22Cn9tCUILoPfbsaQVQO8nQQm6OhD296ePR//201//6P2dUKue3D+8bH6QbNdz6A/54/tvXv/j08f/ySD8CFuB5ob/qAzCj6gT4NLwH0pwbBLAuqprAdaG/60E9v4CHUaAUuE/lOBaqBFBgNLhP3zf69/+FGgsptoFMVuF/5AeJIge6Ll1ssZPoTWuE9jZB4wdausjAqTdS6OTClSj/uyJ+NNo1EBvWYNqXSapAgn0qpBuIUHNa4QJINRdSVD7AvmdQKMXCVrcHWIn2OhBgla3RvGMMDSvLy3vC2QNgM0kODURerkznCPBSI0KBAIABAheT9QfdD8Btgqp8CNMBSodVuFHuDVAqdAKP8IugteGV/gRWoA1IRZ+lKKrZ4SdOlgm9BheACBVBQIIABAAIABAAIAAAAEAAgAEAAgAEAAgAEAAgAAAAQACAAQACAAQACAAQACAAAABAAIABAAIABAA2fkP9gRkKtwinjgAAAAASUVORK5CYII=';
+(function(){
+  const man = { name: 'Trilat Field Survey', short_name: 'Trilat', start_url: './trilat.html',
+                display: 'standalone', background_color: '#0f172a', theme_color: '#0f172a',
+                icons: [{ src: ICON, sizes: '192x192', type: 'image/png' }] };
+  const l = document.createElement('link');
+  l.rel = 'manifest';
+  l.href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(man));
+  document.head.appendChild(l);
+  for(const rel of ['apple-touch-icon', 'icon']){
+    const a = document.createElement('link');
+    a.rel = rel; a.href = ICON;
+    document.head.appendChild(a);
+  }
+})();
+
+/* ------------------------------------------------ init ------------- */
+new ResizeObserver(() => requestPlot()).observe($('plotSec'));
+recompute();
+renderAll();
+if(state.ui.wake && 'wakeLock' in navigator) acquireWake();
+</script>
+</body>
+</html>
