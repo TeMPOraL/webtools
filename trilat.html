@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Trilat Field Survey V2</title>
+<title>Trilat Field Survey V3</title>
 <style>
 :root{
   --bg:#0f172a; --bg2:#0b1120; --surface:#1e293b; --surface2:#243247;
@@ -131,7 +131,7 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 <body>
 
 <header>
-  <h1>Trilat <span class="ver">V2</span></h1>
+  <h1>Trilat <span class="ver">V3</span></h1>
   <div id="stats"></div>
   <button id="helpBtn" class="iconbtn" title="Manual">?</button>
   <button id="undoBtn" class="iconbtn" title="Undo last change">↩</button>
@@ -859,6 +859,45 @@ function csvText(){
   if(sol) for(const n of sol.order){ const p = sol.pos.get(n); L.push(n + ',' + p[0].toFixed(4) + ',' + p[1].toFixed(4)); }
   return L.join('\n') + '\n';
 }
+function svgExport(){
+  // The live plot leans on CSS sizing and SVG2/CSS4 color syntax that strict
+  // standalone viewers reject; export a cleaned SVG 1.1 clone instead.
+  const c = $('plot').cloneNode(true);
+  c.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  c.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  c.setAttribute('version', '1.1');
+  c.setAttribute('width', plotW); c.setAttribute('height', plotH);
+  c.setAttribute('viewBox', '0 0 ' + plotW + ' ' + plotH);
+  c.removeAttribute('id'); c.removeAttribute('style');
+  const rgbaRe = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/;
+  const hex8Re = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})$/;
+  for(const el of [...c.querySelectorAll('*')]){
+    // transparent hit-target helpers are interaction-only — drop them
+    if(el.getAttribute('fill') === 'rgba(0,0,0,0)' || el.getAttribute('stroke') === 'rgba(0,0,0,0)'){ el.remove(); continue; }
+    if(el.tagName === 'image'){
+      const href = el.getAttribute('href');
+      if(!href || el.style.display === 'none'){ el.remove(); continue; }
+      el.removeAttribute('style');
+      el.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
+    }
+    if(el.tagName === 'text'){
+      // the halo trick needs paint-order (CSS3); viewers that ignore it would
+      // paint the stroke over the glyphs, so ship plain text instead
+      el.removeAttribute('stroke'); el.removeAttribute('stroke-width'); el.removeAttribute('style');
+    }
+    for(const [attr, opAttr] of [['fill', 'fill-opacity'], ['stroke', 'stroke-opacity']]){
+      const v = el.getAttribute(attr);
+      if(!v) continue;
+      let m = v.match(rgbaRe);
+      if(m){ el.setAttribute(attr, 'rgb(' + m[1] + ',' + m[2] + ',' + m[3] + ')'); el.setAttribute(opAttr, m[4]); continue; }
+      m = v.match(hex8Re);
+      if(m){ el.setAttribute(attr, '#' + m[1]); el.setAttribute(opAttr, (parseInt(m[2], 16) / 255).toFixed(3)); }
+    }
+    for(const a of [...el.attributes]) if(a.name.startsWith('data-')) el.removeAttribute(a.name);
+    el.removeAttribute('id');
+  }
+  return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(c);
+}
 
 /* ------------------------------------------------ plot ------------- */
 let view = null; // null = autofit; else {cx, cy, k} (world centre, px per metre)
@@ -1471,7 +1510,7 @@ $('panel').addEventListener('click', e => {
     case 'dlTxtBtn': download('survey.txt', exportText()); break;
     case 'shareBtn': navigator.share({ title: 'Trilat survey', text: exportText() }).catch(() => {}); break;
     case 'dlCsvBtn': download('coords.csv', csvText(), 'text/csv'); break;
-    case 'dlSvgBtn': download('sketch.svg', new XMLSerializer().serializeToString($('plot')), 'image/svg+xml'); break;
+    case 'dlSvgBtn': download('sketch.svg', svgExport(), 'image/svg+xml'); break;
     case 'impReplBtn': doImport($('importTa').value, true); break;
     case 'impAppBtn': doImport($('importTa').value, false); break;
     case 'impFileBtn': $('impFile').click(); break;
