@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Trilat Field Survey V3</title>
+<title>Trilat Field Survey V4</title>
 <style>
 :root{
   --bg:#0f172a; --bg2:#0b1120; --surface:#1e293b; --surface2:#243247;
@@ -62,6 +62,7 @@ main{ flex:1; display:flex; flex-direction:column; min-height:0; }
 .row.last{ border-color:var(--accent); }
 .pair{ font-weight:600; min-width:64px; font-size:.95rem; }
 .dedit{ width:86px; text-align:right; font-variant-numeric:tabular-nums; }
+.unitlbl{ font-size:.7rem; color:var(--muted); }
 .rchip{ margin-left:auto; font-size:.8rem; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .rchip.ok{ color:var(--ok); } .rchip.warn{ color:var(--warn); } .rchip.bad{ color:var(--bad); font-weight:700; } .rchip.na{ color:var(--muted); }
 .del{ background:none; border:none; color:var(--muted); font-size:1rem; min-width:38px; min-height:38px; border-radius:8px; }
@@ -98,7 +99,10 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 .pickbtn .pl{ font-size:.6rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 .pickbtn b{ font-size:1.3rem; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
 .pickbtn.set b{ color:var(--accent); }
-#distIn{ flex:1.2; min-width:78px; width:100px; font-size:1.35rem; text-align:center; font-variant-numeric:tabular-nums; }
+#distWrap{ flex:1.2; min-width:82px; position:relative; display:flex; }
+#distIn{ width:100%; min-width:0; font-size:1.35rem; text-align:center; font-variant-numeric:tabular-nums; padding-right:32px; }
+#unitBtn{ position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:.78rem; padding:8px 6px; }
+#unitBtn2{ font-size:.78rem; }
 #addBtn,#kbdAddBtn{ background:var(--accent); color:#0b1120; font-weight:800; font-size:1.5rem; border:none; border-radius:10px; min-width:58px; }
 .mini{ background:var(--bg2); border:1px solid var(--border); color:var(--muted); border-radius:10px; min-width:42px; font-size:1.05rem; }
 #kbdIn{ flex:1; min-width:0; font-family:ui-monospace,monospace; font-size:1.1rem; }
@@ -131,7 +135,7 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 <body>
 
 <header>
-  <h1>Trilat <span class="ver">V3</span></h1>
+  <h1>Trilat <span class="ver">V4</span></h1>
   <div id="stats"></div>
   <button id="helpBtn" class="iconbtn" title="Manual">?</button>
   <button id="undoBtn" class="iconbtn" title="Undo last change">↩</button>
@@ -183,13 +187,17 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
     <button id="fromBtn" class="pickbtn"><span class="pl">from</span><b id="fromVal">—</b></button>
     <button id="swapBtn" class="mini" title="Swap">⇄</button>
     <button id="toBtn" class="pickbtn"><span class="pl">to</span><b id="toVal">—</b></button>
-    <input id="distIn" inputmode="decimal" autocomplete="off" placeholder="m">
+    <span id="distWrap">
+      <input id="distIn" inputmode="decimal" autocomplete="off" placeholder="">
+      <button id="unitBtn" title="Toggle entry unit">mm</button>
+    </span>
     <button id="addBtn" title="Add measurement">＋</button>
     <button id="kbdBtn" class="mini" title="Keyboard entry mode">⌨</button>
   </div>
   <div id="kbdEntry" hidden>
     <span id="kbdSticky">—</span>
-    <input id="kbdIn" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="A B 12.34 · B 12.34 · 12.34">
+    <input id="kbdIn" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="">
+    <button id="unitBtn2" class="mini" title="Toggle entry unit">mm</button>
     <button id="kbdAddBtn">＋</button>
     <button id="touchBtn" class="mini" title="Touch entry mode">☝</button>
   </div>
@@ -205,7 +213,7 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 
 <h3>Field quick-start</h3>
 <ol>
-<li>Tap <b>FROM</b> → pick or create a mark; same for <b>TO</b>; type the taped distance in metres; hit <b>＋</b>.</li>
+<li>Tap <b>FROM</b> → pick or create a mark; same for <b>TO</b>; type the distance; hit <b>＋</b>. The default entry unit is <b>millimetres</b> to match laser rangefinders (<code>1123</code> = 1.123 m) — tap the <b>mm/m</b> label on the distance field to switch. Stored data and exports are always metres.</li>
 <li>FROM stays selected — keep shooting from the same station to other targets.</li>
 <li>Watch the header after every entry: <b>σ</b> should stay at a few mm and residual chips in the Log green.</li>
 <li>If a red <b>⚠ remeasure</b> warning names a pair, re-tape it before moving on.</li>
@@ -222,7 +230,7 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 <h3>Entering measurements</h3>
 <ul>
 <li><b>Touch:</b> FROM/TO pickers with per-mark measurement counts; ⇄ swaps; comma or dot decimals. You can also tap marks directly on the map — first tap sets FROM (green ring), second sets TO (pink ring).</li>
-<li><b>Keyboard (⌨):</b> one line per shot — <code>A B 12.34</code> full form; <code>B 12.34</code> uses the sticky FROM; <code>12.34</code> repeats the current pair. Enter adds. New names create marks automatically.</li>
+<li><b>Keyboard (⌨):</b> one line per shot, distance in the entry unit — <code>A B 1123</code> full form; <code>B 1123</code> uses the sticky FROM; <code>1123</code> repeats the current pair. Enter adds. New names create marks automatically.</li>
 <li>Measuring the same pair several times is fine — repeats are averaged by the adjustment and add redundancy.</li>
 <li>Fix a typo by tapping the number in the <b>Log</b>; ✕ deletes (tap twice); ↩ in the header undoes anything.</li>
 </ul>
@@ -266,6 +274,15 @@ footer#entry{ flex:0 0 auto; border-top:1px solid var(--border); background:var(
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function parseDist(s){ const v = parseFloat(String(s).trim().replace(',', '.')); return (isFinite(v) && v > 0) ? v : null; }
+/* Entry unit: laser rangefinders read out in mm, so distances are typed in the
+   selected unit ("1123" = 1.123 m in mm mode) but always STORED in metres —
+   exports and the trilat.py format are unaffected. */
+function parseEntryDist(s){ const v = parseDist(s); return v == null ? null : (state.ui.unit === 'mm' ? v / 1000 : v); }
+function fmtEntryDist(d){ // metres -> string in the current entry unit
+  if(state.ui.unit !== 'mm') return String(d);
+  const v = d * 1000;
+  return Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : v.toFixed(1);
+}
 function sanitizeName(s){ return String(s).trim().replace(/[^A-Za-z0-9_.\-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 12); }
 function vibrate(ms){ try{ navigator.vibrate && navigator.vibrate(ms); }catch(e){} }
 function pairKey(a, b){ return a < b ? a + '|' + b : b + '|' + a; }
@@ -285,7 +302,7 @@ function toast(msg, bad){
 const LS_KEY = 'trilat-survey-v1';
 function defaultState(){
   return { v: 1, marks: [], obs: [], nextId: 1, bg: null,
-    ui: { from: '', to: '', dist: '', kbdDraft: '', kbd: false, tab: 'log',
+    ui: { from: '', to: '', dist: '', kbdDraft: '', kbd: false, tab: 'log', unit: 'mm',
           showChecks: true, showEll: true, ellScale: 'auto', wake: false, lastObsId: 0 } };
 }
 function loadState(){
@@ -706,7 +723,7 @@ function addObs(aRaw, bRaw, dRaw){
   const a = sanitizeName(aRaw), b = sanitizeName(bRaw);
   if(!a || !b){ toast('Pick FROM and TO marks first', true); return false; }
   if(a === b){ toast('FROM and TO are the same mark', true); return false; }
-  const d = parseDist(dRaw);
+  const d = parseEntryDist(dRaw);
   if(d == null){ toast('Bad distance: "' + dRaw + '"', true); return false; }
   checkpoint();
   ensureMark(a); ensureMark(b);
@@ -715,7 +732,7 @@ function addObs(aRaw, bRaw, dRaw){
   state.ui.from = a; state.ui.to = ''; state.ui.dist = ''; state.ui.lastObsId = id;
   vibrate(25);
   afterMutate();
-  toast(a + ' – ' + b + ' = ' + d + ' m ✓');
+  toast(a + ' – ' + b + ' = ' + fmtEntryDist(d) + ' ' + state.ui.unit + ' ✓');
   return true;
 }
 
@@ -733,7 +750,7 @@ function deleteObs(id){
   afterMutate();
 }
 function editObs(id, dRaw){
-  const d = parseDist(dRaw);
+  const d = parseEntryDist(dRaw);
   if(d == null){ toast('Bad distance', true); renderPanel(); return; }
   const o = state.obs.find(o => o.id === id);
   if(!o || o.d === d) return;
@@ -1285,7 +1302,8 @@ function renderLog(){
     }
     return '<div class="row' + (o.id === state.ui.lastObsId ? ' last' : '') + '">' +
       '<span class="pair">' + esc(o.a) + ' – ' + esc(o.b) + '</span>' +
-      '<input class="dedit" data-oid="' + o.id + '" value="' + o.d + '" inputmode="decimal" autocomplete="off">' +
+      '<input class="dedit" data-oid="' + o.id + '" value="' + fmtEntryDist(o.d) + '" inputmode="decimal" autocomplete="off">' +
+      '<span class="unitlbl">' + state.ui.unit + '</span>' +
       chip +
       '<button class="del" data-del="' + o.id + '">✕</button></div>';
   }).join('');
@@ -1335,7 +1353,7 @@ function renderChecks(){
   if(!sol.checks.length) return head + '<div class="hint">Every pair is measured — nothing left to check.</div>';
   const rows = sol.checks.map(c =>
     '<div class="row chkrow"><span class="pair">' + esc(c.a) + ' – ' + esc(c.b) + '</span>' +
-    '<span class="pred">' + c.d.toFixed(3) + ' m</span>' +
+    '<span class="pred">' + (state.ui.unit === 'mm' ? Math.round(c.d * 1000) + ' mm' : c.d.toFixed(3) + ' m') + '</span>' +
     (c.sd != null ? '<span class="pm">±' + (1.96 * c.sd * 1000).toFixed(1) + ' mm</span>' : '') +
     '<button data-use="' + esc(c.a) + '|' + esc(c.b) + '">use</button></div>').join('');
   return head + '<h3>Unmeasured pairs — shoot one, compare with prediction</h3><div class="rows">' + rows + '</div>';
@@ -1380,6 +1398,9 @@ function renderEntry(){
   $('fromBtn').classList.toggle('set', !!ui.from);
   $('toBtn').classList.toggle('set', !!ui.to);
   $('kbdSticky').textContent = (ui.from || '·') + (ui.to ? '–' + ui.to : '') + ' →';
+  $('unitBtn').textContent = ui.unit;
+  $('unitBtn2').textContent = ui.unit;
+  $('kbdIn').placeholder = ui.unit === 'mm' ? 'A B 1123 · B 1123 · 1123' : 'A B 1.123 · B 1.123 · 1.123';
   const di = $('distIn');
   if(document.activeElement !== di) di.value = ui.dist;
   const ki = $('kbdIn');
@@ -1433,6 +1454,13 @@ $('addBtn').addEventListener('click', () => addObs(state.ui.from, state.ui.to, $
 $('distIn').addEventListener('input', () => { state.ui.dist = $('distIn').value; saveSoon(); });
 $('distIn').addEventListener('keydown', e => { if(e.key === 'Enter') addObs(state.ui.from, state.ui.to, $('distIn').value); });
 
+function toggleUnit(){
+  state.ui.unit = state.ui.unit === 'mm' ? 'm' : 'mm';
+  save(); renderEntry(); renderPanel();
+  toast('Entry unit: ' + state.ui.unit + (state.ui.unit === 'mm' ? ' (1123 = 1.123 m)' : ''));
+}
+$('unitBtn').addEventListener('click', toggleUnit);
+$('unitBtn2').addEventListener('click', toggleUnit);
 $('kbdBtn').addEventListener('click', () => { state.ui.kbd = true; save(); renderEntry(); closePicker(); $('kbdIn').focus(); });
 $('touchBtn').addEventListener('click', () => { state.ui.kbd = false; save(); renderEntry(); });
 function kbdAdd(){
