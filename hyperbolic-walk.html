@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Hyperbolic Walk V1</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#dfe7e6;
+               font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  canvas { display:block; touch-action:none; }
+  #hud {
+    position:fixed; top:10px; left:10px; z-index:10; max-width:360px;
+    background:rgba(20,30,34,0.78); color:#e8eef0; border-radius:12px;
+    padding:12px 14px; font-size:13px; line-height:1.45;
+    backdrop-filter: blur(4px); user-select:none;
+  }
+  #hud h1 { margin:0 0 6px; font-size:16px; letter-spacing:0.02em; }
+  #hud .sub { color:#9fb4ba; font-size:11.5px; margin:0 0 8px; }
+  #hud .keys { color:#c8d6da; font-size:12px; margin:0 0 8px; }
+  #hud .keys b { color:#ffffff; font-weight:600; }
+  #hud .notice { color:#aec6b8; font-size:11.5px; margin:8px 0 0; }
+  #stats { margin-top:8px; font-size:12px; color:#dfe9c9; }
+  #stats .big { font-weight:700; color:#fff; }
+  .row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .row label { font-size:12px; color:#c8d6da; white-space:nowrap; }
+  input[type=range] { flex:1; accent-color:#7fb069; }
+  #kval { min-width:44px; text-align:right; font-variant-numeric:tabular-nums; }
+  #fps { position:fixed; bottom:8px; right:10px; z-index:10; color:rgba(20,40,45,0.55);
+         font-size:11px; font-variant-numeric:tabular-nums; }
+  #lockprompt {
+    position:fixed; inset:0; z-index:5; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; transition:opacity 0.3s;
+  }
+  #lockprompt span {
+    background:rgba(20,30,34,0.72); color:#fff; padding:10px 18px; border-radius:999px;
+    font-size:14px; letter-spacing:0.02em;
+  }
+  .hidden { display:none !important; }
+  #hudclose {
+    position:absolute; top:6px; right:8px; background:none; border:none; color:#9fb4ba;
+    font-size:20px; line-height:1; cursor:pointer; padding:4px;
+  }
+  #hudopen {
+    position:fixed; top:10px; left:10px; z-index:10; background:rgba(20,30,34,0.6);
+    color:#cfdde2; border:none; border-radius:999px; width:34px; height:34px;
+    font-size:16px; cursor:pointer;
+  }
+  details summary { cursor:pointer; color:#9fb4ba; font-size:11.5px; margin-top:6px; }
+  details p { margin:6px 0 0; font-size:11.5px; color:#b7c7cc; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <button id="hudclose" title="Hide panel (H)">&times;</button>
+  <h1>Hyperbolic Walk</h1>
+  <p class="sub">A first-person stroll through genuinely hyperbolic space (H&sup3;), rendered via the hyperboloid model &rarr; Beltrami&ndash;Klein projection. All straight lines you see are true geodesics.</p>
+  <p class="keys"><b>Click</b> to capture mouse &middot; <b>WASD</b>/arrows walk &middot; <b>Shift</b> run &middot; <b>mouse</b> look<br>
+  <b>G</b> ground grid &middot; <b>H</b> hide UI &middot; <b>R</b> return to spawn<br>
+  Touch: <b>left half</b> = move stick, <b>right half</b> = look.</p>
+  <div class="row">
+    <label for="kslider">Curvature radius</label>
+    <input id="kslider" type="range" min="6" max="40" step="1" value="12">
+    <span id="kval">12 m</span>
+  </div>
+  <div id="stats">&nbsp;</div>
+  <details>
+    <summary>What to look for</summary>
+    <p>&bull; Distant things shrink <i>exponentially</i> fast &mdash; the barn almost vanishes from across the meadow.<br>
+    &bull; Strafe sideways past a tree: perspective twists in a very non-Euclidean way.<br>
+    &bull; Walk a loop around the pond and you return <i>rotated</i> (holonomy) &mdash; direction is path-dependent here.<br>
+    &bull; The ground rings are 10&nbsp;m apart; watch how much circumference each successive ring gains.<br>
+    &bull; Drag the curvature slider: small radius = strongly curved, 40 m &asymp; nearly flat.</p>
+  </details>
+</div>
+<button id="hudopen" class="hidden" title="Show panel">?</button>
+<div id="lockprompt"><span>Click to look around &middot; WASD to walk</span></div>
+<div id="fps"></div>
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.172.0';
+
+THREE.ColorManagement.enabled = false;
+
+// ---------------------------------------------------------------------------
+// Hyperbolic (Lorentz / Minkowski) math.
+// Points live on the hyperboloid  x^2 + y^2 + z^2 - w^2 = -1,  w > 0.
+// Isometries are 4x4 Lorentz matrices; the camera renders the Beltrami-Klein
+// projection (xyz/w), in which geodesics are straight lines, so an ordinary
+// perspective camera at the origin of the Klein ball produces a correct image.
+// ---------------------------------------------------------------------------
+const M4 = THREE.Matrix4;
+const JSIG = [1, 1, 1, -1];
+
+function lorentzInv(out, m) {           // out = J * m^T * J  (exact Lorentz inverse)
+  const e = m.elements, o = out.elements;
+  for (let r = 0; r < 4; r++)
+    for (let c = 0; c < 4; c++)
+      o[c * 4 + r] = JSIG[r] * JSIG[c] * e[r * 4 + c];
+  return out;
+}
+
+function makeBoost(out, ux, uy, uz, a) { // translation by distance a along unit dir u
+  const c = Math.cosh(a), s = Math.sinh(a), k = c - 1;
+  out.set(
+    1 + k * ux * ux, k * ux * uy,     k * ux * uz,     s * ux,
+    k * uy * ux,     1 + k * uy * uy, k * uy * uz,     s * uy,
+    k * uz * ux,     k * uz * uy,     1 + k * uz * uz, s * uz,
+    s * ux,          s * uy,          s * uz,          c
+  );
+  return out;
+}
+
+function mdot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] - a[3]*b[3]; }
+
+// Re-orthonormalize the player's ground frame (must stay a Lorentz matrix that
+// preserves the geodesic ground plane y=0), killing floating-point drift.
+function renormGround(G) {
+  const e = G.elements;
+  const c0 = [e[0], 0, e[2], e[3]];
+  const c2 = [e[8], 0, e[10], e[11]];
+  const c3 = [e[12], 0, e[14], e[15]];
+  let s = Math.sqrt(-mdot(c3, c3));
+  c3[0] /= s; c3[2] /= s; c3[3] /= s;
+  let d = mdot(c0, c3);
+  c0[0] += d * c3[0]; c0[2] += d * c3[2]; c0[3] += d * c3[3];
+  s = Math.sqrt(mdot(c0, c0));
+  c0[0] /= s; c0[2] /= s; c0[3] /= s;
+  d = mdot(c2, c3);
+  c2[0] += d * c3[0]; c2[2] += d * c3[2]; c2[3] += d * c3[3];
+  d = mdot(c2, c0);
+  c2[0] -= d * c0[0]; c2[2] -= d * c0[2]; c2[3] -= d * c0[3];
+  s = Math.sqrt(mdot(c2, c2));
+  c2[0] /= s; c2[2] /= s; c2[3] /= s;
+  e[0] = c0[0]; e[1] = 0; e[2]  = c0[2]; e[3]  = c0[3];
+  e[4] = 0;     e[5] = 1; e[6]  = 0;     e[7]  = 0;
+  e[8] = c2[0]; e[9] = 0; e[10] = c2[2]; e[11] = c2[3];
+  e[12] = c3[0]; e[13] = 0; e[14] = c3[2]; e[15] = c3[3];
+}
+
+// ---------------------------------------------------------------------------
+// World scale. K = curvature radius in meters (1 hyperbolic unit = K meters).
+// Object layout is authored in meters and mapped into H^3 by the exponential
+// map at the world origin; distances along rays from the origin are exact.
+// ---------------------------------------------------------------------------
+let K = 12;
+const EYE_M = 1.7;        // eye height, meters
+const WALK_M = 5.0;       // walk speed m/s
+const RUN_M = 10.5;
+const WORLD_EDGE_M = 225; // soft walking boundary
+const CULL_D = 9.5;       // hide objects beyond this many hyperbolic units (fully fogged)
+
+function placeMat(xM, zM, yaw) { // layout meters -> Lorentz placement matrix
+  const m = new M4();
+  const rM = Math.hypot(xM, zM);
+  if (rM > 1e-9) makeBoost(m, xM / rM, 0, zM / rM, rM / K);
+  if (yaw) m.multiply(new M4().makeRotationY(yaw));
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer / scene scaffolding
+// ---------------------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+// The camera never moves: it sits at the center of the Klein ball. near/far are
+// in Klein units (ball radius 1).
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 1.05);
+
+const SHARED = {
+  uInvK: { value: 1 / K },
+  uSun:  { value: new THREE.Vector3(0.42, 0.8, 0.28) },
+  uFogC: { value: new THREE.Color(0xe3ebe9) },
+  uFogD: { value: 0.055 },
+  uTime: { value: 0 },
+  uGrid: { value: 1 },
+};
+
+const VSH = /* glsl */`
+uniform mat4 uRel;
+uniform float uInvK;
+uniform float uSize;
+in vec3 aCol;
+out vec3 vColor;
+out vec3 vNormal;
+out float vDist;
+#ifdef GROUND
+in float aWater;
+out vec2 vLocal;
+out float vWater;
+#endif
+void main() {
+  vec3 pm = position * uSize;       // local meters
+  vec3 t = pm * uInvK;              // tangent vector, curvature units
+  float r = length(t);
+  vec4 h = (r < 1e-7) ? vec4(0.0, 0.0, 0.0, 1.0)
+                      : vec4(t * (sinh(r) / r), cosh(r));   // exp map onto hyperboloid
+  vec4 q = uRel * h;                // into camera frame (Lorentz)
+  float w = max(q.w, 1.0);
+  vec3 klein = q.xyz / w;           // Beltrami-Klein ball
+  vDist = acosh(w);                 // true hyperbolic distance from the eye
+  vColor = aCol;
+  vNormal = normal;
+#ifdef GROUND
+  vLocal = pm.xz;
+  vWater = aWater;
+#endif
+  gl_Position = projectionMatrix * vec4(klein, 1.0);
+}`;
+
+const FSH = /* glsl */`
+out vec4 outColor;
+uniform vec3 uSun;
+uniform vec3 uFogC;
+uniform float uFogD;
+uniform vec3 uTint;
+uniform float uTime;
+uniform float uGrid;
+in vec3 vColor;
+in vec3 vNormal;
+in float vDist;
+#ifdef GROUND
+in vec2 vLocal;
+in float vWater;
+#endif
+void main() {
+  vec3 n = normalize(vNormal);
+  if (!gl_FrontFacing) n = -n;
+  float dl = max(dot(n, normalize(uSun)), 0.0);
+  vec3 col = vColor * uTint * (0.72 + 0.28 * dl);
+#ifdef GROUND
+  if (vWater > 0.45) {
+    float sp = sin(vLocal.x * 1.4 + uTime * 1.6) * sin(vLocal.y * 1.1 - uTime * 1.2)
+             + 0.5 * sin((vLocal.x + vLocal.y) * 0.9 + uTime * 2.3);
+    col += vec3(0.03, 0.045, 0.055) * sp;
+  }
+  if (uGrid > 0.5 && vWater < 0.45) {
+    // rings of constant hyperbolic distance from spawn, every 10 m
+    float rr = length(vLocal);
+    float fr = abs(fract(rr / 10.0 + 0.5) - 0.5) * 10.0;
+    float wr = fwidth(rr) + 0.03;
+    float ring = (1.0 - smoothstep(0.08, 0.08 + wr, fr)) * clamp(0.3 / wr, 0.0, 1.0);
+    col *= 1.0 - 0.09 * ring;
+  }
+#endif
+  float fog = 1.0 - exp(-uFogD * vDist * vDist);
+  col = mix(col, uFogC, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}`;
+
+const allMats = [];
+function makeMat(ground) {
+  const mat = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: VSH,
+    fragmentShader: FSH,
+    side: THREE.DoubleSide,
+    defines: ground ? { GROUND: 1 } : {},
+    uniforms: {
+      uRel:  { value: new M4() },
+      uSize: { value: 1 },
+      uTint: { value: new THREE.Vector3(1, 1, 1) },
+      ...SHARED,
+    },
+  });
+  allMats.push(mat);
+  return mat;
+}
+
+// Sky: fullscreen gradient triangle, drawn first, no depth.
+const skyGeo = new THREE.BufferGeometry();
+skyGeo.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+const skyMat = new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  depthTest: false, depthWrite: false,
+  uniforms: {
+    uProjInv: { value: camera.projectionMatrixInverse },
+    uPitch: { value: 0 },
+    uZen: { value: new THREE.Color(0xa5c6d1) },
+    uHor: { value: new THREE.Color(0xe9efec) },
+  },
+  vertexShader: /* glsl */`
+    out vec2 vN;
+    void main() { vN = position.xy; gl_Position = vec4(position.xy, 0.99999, 1.0); }`,
+  fragmentShader: /* glsl */`
+    out vec4 outColor;
+    uniform mat4 uProjInv;
+    uniform float uPitch;
+    uniform vec3 uZen;
+    uniform vec3 uHor;
+    in vec2 vN;
+    void main() {
+      vec4 v4 = uProjInv * vec4(vN, 0.5, 1.0);
+      vec3 dir = normalize(v4.xyz / v4.w);
+      float y = dir.y * cos(uPitch) - dir.z * sin(uPitch);
+      vec3 c = mix(uHor, uZen, smoothstep(-0.02, 0.6, y));
+      outColor = vec4(c, 1.0);
+    }`,
+});
+const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+skyMesh.frustumCulled = false;
+skyMesh.renderOrder = -1;
+scene.add(skyMesh);
+
+// ---------------------------------------------------------------------------
+// Geometry helpers (low-poly, flat-shaded, vertex-colored)
+// ---------------------------------------------------------------------------
+let seed = 1337;
+function rng() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+function hash2(x, z) { const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return s - Math.floor(s); }
+
+const tmpC = new THREE.Color();
+function xf(x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) {
+  const m = new M4();
+  m.makeRotationFromEuler(new THREE.Euler(rx, ry, rz));
+  m.scale(new THREE.Vector3(sx, sy, sz));
+  m.setPosition(x, y, z);
+  return m;
+}
+
+function partsBuilder() {
+  const P = [], N = [], C = [];
+  return {
+    add(geo, hex, mtx = null, jitter = 0) {
+      let g = geo.index ? geo.toNonIndexed() : geo.clone();
+      if (mtx) g.applyMatrix4(mtx);
+      g.computeVertexNormals();
+      const p = g.attributes.position.array, n = g.attributes.normal.array;
+      for (let i = 0; i < p.length; i += 9) {         // per-face color jitter
+        tmpC.setHex(hex);
+        if (jitter) tmpC.offsetHSL(0, 0, (rng() - 0.5) * 2 * jitter);
+        for (let v = 0; v < 9; v += 3) {
+          P.push(p[i + v], p[i + v + 1], p[i + v + 2]);
+          N.push(n[i + v], n[i + v + 1], n[i + v + 2]);
+          C.push(tmpC.r, tmpC.g, tmpC.b);
+        }
+      }
+      geo.dispose();
+    },
+    build() {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+      g.setAttribute('aCol', new THREE.Float32BufferAttribute(C, 3));
+      return g;
+    },
+  };
+}
+
+function prismGeo(w, h, d) {   // triangular gable prism, apex up, base at y=0
+  const g = new THREE.BufferGeometry();
+  const v = [
+    -w / 2, 0, d / 2,   w / 2, 0, d / 2,   0, h, d / 2,
+    -w / 2, 0, -d / 2,  w / 2, 0, -d / 2,  0, h, -d / 2,
+  ];
+  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  g.setIndex([0, 1, 2, 4, 3, 5, 0, 2, 5, 0, 5, 3, 1, 4, 5, 1, 5, 2, 0, 3, 4, 0, 4, 1]);
+  return g;
+}
+
+function frustumBoxGeo(w0, h0, w1, h1, len) { // tapers from (w0,h0) at z=+len/2 to (w1,h1) at z=-len/2
+  const g = new THREE.BufferGeometry();
+  const zb = len / 2, zf = -len / 2;
+  const v = [
+    -w0/2,-h0/2, zb,  w0/2,-h0/2, zb,  w0/2, h0/2, zb,  -w0/2, h0/2, zb,
+    -w1/2,-h1/2, zf,  w1/2,-h1/2, zf,  w1/2, h1/2, zf,  -w1/2, h1/2, zf,
+  ];
+  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  g.setIndex([
+    0,2,1, 0,3,2,      // back
+    4,5,6, 4,6,7,      // front
+    0,1,5, 0,5,4,      // bottom
+    3,7,6, 3,6,2,      // top
+    0,4,7, 0,7,3,      // left
+    1,2,6, 1,6,5,      // right
+  ]);
+  return g;
+}
+
+// --- Trees, bushes, rocks ---
+function coniferGeo() {
+  const b = partsBuilder();
+  b.add(new THREE.CylinderGeometry(0.16, 0.28, 1.5, 6), 0x7a5a42, xf(0, 0.75, 0));
+  b.add(new THREE.ConeGeometry(1.65, 2.6, 7), 0x4f7f4a, xf(0, 2.3, 0), 0.05);
+  b.add(new THREE.ConeGeometry(1.28, 2.2, 7), 0x578a51, xf(0, 3.4, 0), 0.05);
+  b.add(new THREE.ConeGeometry(0.92, 1.9, 7), 0x619558, xf(0, 4.45, 0), 0.05);
+  return b.build();
+}
+function deciduousGeo() {
+  const b = partsBuilder();
+  b.add(new THREE.CylinderGeometry(0.22, 0.34, 2.0, 6), 0x81614a, xf(0, 1.0, 0));
+  b.add(new THREE.IcosahedronGeometry(1.7, 0), 0x6da05b, xf(0, 3.1, 0, 0.3, 0.5, 0, 1, 0.85, 1), 0.06);
+  b.add(new THREE.IcosahedronGeometry(1.05, 0), 0x79ab63, xf(1.0, 2.4, 0.45, 0.8, 0.2, 0), 0.06);
+  return b.build();
+}
+function bushGeo() {
+  const b = partsBuilder();
+  b.add(new THREE.IcosahedronGeometry(0.9, 0), 0x7cab6a, xf(0, 0.5, 0, 0.4, 0.9, 0, 1, 0.62, 1), 0.05);
+  return b.build();
+}
+function rockGeo() {
+  const b = partsBuilder();
+  b.add(new THREE.IcosahedronGeometry(1, 0), 0x99a2a3, xf(0, 0.42, 0, 0.5, 1.1, 0.3, 1, 0.6, 0.85), 0.05);
+  return b.build();
+}
+
+// --- Farm ---
+function barnGeo() {
+  const b = partsBuilder();
+  b.add(new THREE.BoxGeometry(9, 3.6, 6.5), 0xe9dfc8, xf(0, 1.8, 0), 0.02);       // body
+  b.add(prismGeo(10.2, 2.7, 7.6), 0x8b7867, xf(0, 3.55, 0), 0.03);                // gable roof
+  b.add(new THREE.BoxGeometry(2.0, 2.6, 0.2), 0x6b4a33, xf(-1.6, 1.3, 3.3));      // barn door
+  b.add(new THREE.BoxGeometry(1.0, 1.0, 0.16), 0x5a6b78, xf(1.9, 2.0, 3.3));      // window
+  b.add(new THREE.BoxGeometry(0.16, 1.0, 1.0), 0x5a6b78, xf(-4.55, 2.0, -1.2));   // side window
+  b.add(new THREE.BoxGeometry(9.4, 0.5, 6.9), 0xb3a893, xf(0, 0.25, 0));          // stone base
+  return b.build();
+}
+function siloGeo() {
+  const b = partsBuilder();
+  b.add(new THREE.CylinderGeometry(1.6, 1.7, 5.4, 10), 0xacb5ab, xf(0, 2.7, 0), 0.02);
+  b.add(new THREE.ConeGeometry(1.85, 1.5, 10), 0x8b7867, xf(0, 6.1, 0));
+  return b.build();
+}
+function hayGeo() {
+  const b = partsBuilder();
+  b.add(new THREE.CylinderGeometry(0.85, 0.85, 1.5, 9), 0xd9bd6e, xf(0, 0.85, 0, 0, 0, Math.PI / 2), 0.05);
+  return b.build();
+}
+function fenceGeo(L) {
+  const b = partsBuilder();
+  b.add(new THREE.BoxGeometry(0.18, 1.2, 0.18), 0x8a7052, xf(-L / 2, 0.6, 0), 0.04);
+  b.add(new THREE.BoxGeometry(0.18, 1.2, 0.18), 0x8a7052, xf(L / 2, 0.6, 0), 0.04);
+  b.add(new THREE.BoxGeometry(L + 0.15, 0.14, 0.07), 0x977c5c, xf(0, 0.95, 0), 0.04);
+  b.add(new THREE.BoxGeometry(L + 0.15, 0.14, 0.07), 0x977c5c, xf(0, 0.55, 0), 0.04);
+  return b.build();
+}
+
+// --- Starfleet shuttle (Type-6-ish, nose toward -z) ---
+function shuttleGeo() {
+  const b = partsBuilder();
+  const hull = 0xc7ccd4, dark = 0x9aa1ab;
+  b.add(new THREE.BoxGeometry(0.45, 0.22, 5.4), dark, xf(-1.5, 0.12, 0.2));       // skids
+  b.add(new THREE.BoxGeometry(0.45, 0.22, 5.4), dark, xf(1.5, 0.12, 0.2));
+  for (const zz of [-1.6, 2.0]) {
+    b.add(new THREE.BoxGeometry(0.28, 0.55, 0.4), dark, xf(-1.5, 0.48, zz));      // legs
+    b.add(new THREE.BoxGeometry(0.28, 0.55, 0.4), dark, xf(1.5, 0.48, zz));
+  }
+  b.add(new THREE.BoxGeometry(3.4, 2.0, 6.0), hull, xf(0, 1.72, 0.3), 0.015);     // main hull
+  b.add(frustumBoxGeo(3.4, 2.0, 2.2, 1.15, 2.1), hull, xf(0, 1.6, -3.75), 0.015); // tapered nose
+  b.add(new THREE.BoxGeometry(1.7, 0.8, 0.14), 0x2c3a49, xf(0, 2.15, -3.6, 0.32, 0, 0)); // windshield
+  b.add(new THREE.BoxGeometry(2.4, 0.5, 3.4), 0xb9bfc9, xf(0, 2.95, 0.5), 0.02);  // roof hump
+  b.add(new THREE.BoxGeometry(3.5, 0.17, 3.6), 0xb03a3a, xf(0, 1.35, 0.4));       // red stripe
+  b.add(new THREE.BoxGeometry(2.1, 1.6, 0.16), dark, xf(0, 1.55, 3.38));          // aft hatch
+  b.add(new THREE.BoxGeometry(1.8, 0.3, 0.35), 0x8f959e, xf(0, 2.78, 3.15));      // impulse vent
+  for (const sx of [-1, 1]) {
+    b.add(new THREE.BoxGeometry(1.1, 0.34, 1.3), dark, xf(sx * 2.0, 1.1, 0.6));   // pylon
+    b.add(new THREE.CylinderGeometry(0.52, 0.52, 5.2, 8), 0xb3bac4,
+          xf(sx * 2.5, 0.82, 0.5, Math.PI / 2, 0, 0), 0.02);                      // nacelle
+    b.add(new THREE.CylinderGeometry(0.53, 0.4, 0.6, 8), 0xc2503c,
+          xf(sx * 2.5, 0.82, -2.35, Math.PI / 2, 0, 0));                          // bussard
+    b.add(new THREE.CylinderGeometry(0.46, 0.46, 0.28, 8), 0x4f7fc0,
+          xf(sx * 2.5, 0.82, 3.22, Math.PI / 2, 0, 0));                           // aft glow
+  }
+  return b.build();
+}
+
+// ---------------------------------------------------------------------------
+// Ground: geodesic plane y=0, one polar mesh authored in layout meters.
+// Zone painting matches the concept sketch: meadow, wheat field by the barn,
+// forest floor to the west, pond, stream running down from the shuttle
+// clearing, dirt paths.
+// ---------------------------------------------------------------------------
+const streamX = z => -12 + (18 - z) * 0.12 + 6 * Math.sin((18 - z) * 0.09);
+function segDist(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz)));
+  return Math.hypot(px - (ax + t * dx), pz - (az + t * dz));
+}
+const FIELD = { x0: 18, z0: -6, x1: 44, z1: 18 };
+const CLEAR = { x: 6, z: -52, r: 14 };
+
+function groundSample(x, z) {
+  const c = new THREE.Color(0xa9c98c);
+  c.lerp(tmpC.setHex(0xbccf83), (0.5 + 0.5 * Math.sin(x * 0.045 - z * 0.06 + 1.0)) * 0.35);
+  c.offsetHSL(0, 0, (hash2(x * 0.37, z * 0.37) - 0.5) * 0.07);
+  let water = 0;
+  const tf = Math.max(0, Math.min(1, (-22 - x) / 12));                      // forest floor (west)
+  if (tf > 0) c.lerp(tmpC.setHex(0x7e9c6d), tf * 0.85);
+  const dc = Math.hypot(x - CLEAR.x, z - CLEAR.z);                          // shuttle clearing
+  if (dc < CLEAR.r) c.lerp(tmpC.setHex(0xbad094), (1 - dc / CLEAR.r) * 0.8);
+  if (x >= FIELD.x0 && x <= FIELD.x1 && z >= FIELD.z0 && z <= FIELD.z1) {   // wheat field
+    c.setHex(0xddc97e);
+    if (((Math.floor(z / 2.2) % 2) + 2) % 2 === 0) c.multiplyScalar(0.94);
+    c.offsetHSL(0, 0, (hash2(x * 0.53, z * 0.53) - 0.5) * 0.04);
+  }
+  for (const [ax, az, bx, bz] of [[2, 0, 26, 3], [0, -3, 5, -46]]) {        // dirt paths
+    const d = segDist(x, z, ax, az, bx, bz);
+    if (d < 1.8) {
+      const t = d < 1.2 ? 1 : (1.8 - d) / 0.6;
+      c.lerp(tmpC.setHex(0xc4a97a), t);
+    }
+  }
+  const e = ((x + 12) / 9.5) ** 2 + ((z - 18) / 6.5) ** 2;                  // pond
+  if (e < 1.35 && e >= 1) c.lerp(tmpC.setHex(0xb9ac82), (1.35 - e) / 0.35 * 0.6);
+  if (z > -80 && z < 20) {                                                  // stream + banks
+    const hw = 1.6 + 0.5 * Math.sin(z * 0.23);
+    const dxs = Math.abs(x - streamX(z));
+    if (dxs < hw + 1.1 && dxs >= hw) c.lerp(tmpC.setHex(0xb9ac82), (1 - (dxs - hw) / 1.1) * 0.6);
+    if (dxs < hw) { c.setHex(0x6484b8); c.offsetHSL(0, 0, (hash2(x, z) - 0.5) * 0.03); water = 1; }
+  }
+  if (e < 1) { c.setHex(0x7fa3cc).lerp(tmpC.setHex(0x5e82ad), 1 - e); water = 1; }
+  return { c, water };
+}
+
+function isWaterAt(x, z) {
+  const e = ((x + 12) / 9.5) ** 2 + ((z - 18) / 6.5) ** 2;
+  if (e < 1.3) return true;
+  if (z > -80 && z < 20 && Math.abs(x - streamX(z)) < 1.6 + 0.5 * Math.sin(z * 0.23) + 1) return true;
+  return false;
+}
+function isOnPath(x, z) {
+  return segDist(x, z, 2, 0, 26, 3) < 2.6 || segDist(x, z, 0, -3, 5, -46) < 2.6;
+}
+
+function buildGround() {
+  const radii = [0];
+  for (let r = 2; r <= 80; r += 2) radii.push(r);
+  for (let r = 90; r <= 250; r += 10) radii.push(r);
+  const SEG = 96;
+  const P = [], N = [], C = [], W = [], I = [];
+  for (let i = 0; i < radii.length; i++) {
+    for (let a = 0; a < SEG; a++) {
+      const th = a / SEG * Math.PI * 2;
+      const x = radii[i] * Math.cos(th), z = radii[i] * Math.sin(th);
+      P.push(x, 0, z); N.push(0, 1, 0);
+      const s = groundSample(x, z);
+      C.push(s.c.r, s.c.g, s.c.b); W.push(s.water);
+    }
+  }
+  for (let i = 0; i < radii.length - 1; i++) {
+    for (let a = 0; a < SEG; a++) {
+      const a2 = (a + 1) % SEG;
+      const r0 = i * SEG, r1 = (i + 1) * SEG;
+      I.push(r0 + a, r1 + a, r1 + a2, r0 + a, r1 + a2, r0 + a2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  g.setAttribute('aCol', new THREE.Float32BufferAttribute(C, 3));
+  g.setAttribute('aWater', new THREE.Float32BufferAttribute(W, 1));
+  g.setIndex(I);
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Object placement
+// ---------------------------------------------------------------------------
+const objects = [];   // { mesh, x, z, yaw, world }
+function place(geo, xM, zM, yaw = 0, size = 1, tint = null) {
+  const mat = makeMat(false);
+  mat.uniforms.uSize.value = size;
+  if (tint) mat.uniforms.uTint.value.set(tint[0], tint[1], tint[2]);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  const o = { mesh, x: xM, z: zM, yaw, world: placeMat(xM, zM, yaw), uni: mat.uniforms };
+  objects.push(o);
+  return o;
+}
+
+const groundMesh = new THREE.Mesh(buildGround(), makeMat(true));
+groundMesh.frustumCulled = false;
+scene.add(groundMesh);
+const groundUni = groundMesh.material.uniforms;
+
+const GEO = {
+  conifer: coniferGeo(), conifer2: coniferGeo(), deciduous: deciduousGeo(),
+  bush: bushGeo(), rock: rockGeo(),
+  barn: barnGeo(), silo: siloGeo(), hay: hayGeo(), shuttle: shuttleGeo(),
+};
+
+// Farm
+place(GEO.barn, 31, 6, 1.9);
+place(GEO.silo, 37.5, 9.5);
+place(GEO.hay, 23, 12, 0.4);
+place(GEO.hay, 26, 13.5, 1.9);
+place(GEO.hay, 22.5, 9.3, 2.8);
+
+// Fence around the field with a gate on the west side where the path enters
+{
+  const { x0, z0, x1, z1 } = FIELD;
+  const corners = [[x0, z0], [x1, z0], [x1, z1], [x0, z1], [x0, z0]];
+  for (let e = 0; e < 4; e++) {
+    const [ax, az] = corners[e], [bx, bz] = corners[e + 1];
+    const len = Math.hypot(bx - ax, bz - az);
+    const n = Math.ceil(len / 4);
+    const ex = (bx - ax) / len, ez = (bz - az) / len;
+    for (let i = 0; i < n; i++) {
+      const t0 = (i + 0.5) * (len / n);
+      const mx = ax + ex * t0, mz = az + ez * t0;
+      if (Math.hypot(mx - 18, mz - 2.5) < 3.2) continue;   // gate gap
+      place(GEO.fenceSeg || (GEO.fenceSeg = fenceGeo(4)), mx, mz,
+            Math.atan2(-ez, ex), (len / n) / 4);
+    }
+  }
+}
+
+// Shuttle on its clearing
+place(GEO.shuttle, CLEAR.x, CLEAR.z, 0.55);
+
+// Forest band to the west (dense — hyperbolic shrink eats sparse forests alive)
+function treeOK(x, z) {
+  if (Math.hypot(x, z) > 84) return false;
+  if (isWaterAt(x, z) || isOnPath(x, z)) return false;
+  if (x > FIELD.x0 - 2 && x < FIELD.x1 + 2 && z > FIELD.z0 - 2 && z < FIELD.z1 + 2) return false;
+  if (Math.hypot(x - CLEAR.x, z - CLEAR.z) < CLEAR.r + 1.5) return false;
+  return true;
+}
+function plantTree(x, z, sizeBoost = 0) {
+  const t = rng();
+  place(t < 0.8 ? (t < 0.4 ? GEO.conifer : GEO.conifer2) : GEO.deciduous,
+        x, z, rng() * Math.PI * 2, 0.85 + sizeBoost + rng() * 0.7,
+        [0.92 + rng() * 0.16, 0.95 + rng() * 0.1, 0.9 + rng() * 0.15]);
+}
+for (let gx = -90; gx <= -10; gx += 4.6) {
+  for (let gz = -80; gz <= 45; gz += 4.6) {
+    const x = gx + (rng() - 0.5) * 3.8, z = gz + (rng() - 0.5) * 3.8;
+    const p = Math.max(0, Math.min(1, (-12 - x) / 14)) * 0.72 + 0.04;
+    if (rng() > p) continue;
+    if (!treeOK(x, z)) continue;
+    plantTree(x, z);
+  }
+}
+// sparse single trees scattered east/south for parallax reference
+for (let i = 0; i < 60; i++) {
+  const x = -5 + rng() * 65, z = -70 + rng() * 115;
+  if (rng() > 0.25) continue;
+  if (!treeOK(x, z)) continue;
+  plantTree(x, z);
+}
+
+// Tree ring around the shuttle clearing (sells the "clearing in the woods")
+for (let a = 0; a < Math.PI * 2; a += 0.42) {
+  if (Math.abs(a - Math.PI / 2) < 0.5) continue;          // opening toward the path (north side)
+  const r = CLEAR.r + 2.5 + rng() * 5;
+  const x = CLEAR.x + r * Math.cos(a), z = CLEAR.z + r * Math.sin(a);
+  if (isWaterAt(x, z) || isOnPath(x, z)) continue;
+  if (rng() < 0.8) place(rng() < 0.75 ? GEO.conifer : GEO.conifer2, x, z,
+                         rng() * Math.PI * 2, 0.8 + rng() * 0.5,
+                         [0.92 + rng() * 0.16, 0.95 + rng() * 0.1, 0.9 + rng() * 0.15]);
+}
+
+// Landmark trees, bushes, rocks scattered for parallax reference
+for (const [x, z, s] of [[-14, -6, 1.15], [-17, 27, 1.3], [-9, -27, 1.0], [21, -21, 0.9],
+                         [47, -5, 1.05], [-24, -44, 1.1]])
+  place(GEO.conifer, x, z, rng() * 6.28, s);
+for (const [x, z, s] of [[14, 31, 1.25], [39, 22, 1.45], [-4, 42, 1.1], [24, -36, 1.0]])
+  place(GEO.deciduous, x, z, rng() * 6.28, s);
+for (const [x, z] of [[-6, 8], [11, 14], [15, -9], [-18, -13], [8, 31], [-26, 29],
+                      [17, -29], [-2, -17], [33, -12], [-31, 14]])
+  place(GEO.bush, x, z, rng() * 6.28, 0.8 + rng() * 0.6);
+for (const [x, z, s] of [[-3, -38, 0.9], [9, -59, 1.3], [-22, 3, 0.8], [12, -15, 0.6],
+                         [-31, -19, 1.1], [2, 24, 0.7]])
+  place(GEO.rock, x, z, rng() * 6.28, s);
+
+// ---------------------------------------------------------------------------
+// Player state and controls
+// ---------------------------------------------------------------------------
+let G = new M4();               // ground frame: position+heading on the plane H^2
+let pitch = 0;
+let pendYaw = 0, pendPitch = 0;
+const keys = {};
+let touchUsed = false;
+let moveTouch = null, lookTouch = null;
+let touchMX = 0, touchMZ = 0;
+
+function faceYaw(fx, fz) { return Math.atan2(-fx, -fz); }
+function resetSpawn() { G.identity(); G.multiply(new M4().makeRotationY(faceYaw(31, 6))); pitch = 0; }
+resetSpawn();
+
+const canvas = renderer.domElement;
+const hudEl = document.getElementById('hud');
+const hudOpenEl = document.getElementById('hudopen');
+function toggleHud(force) {
+  const hide = force !== undefined ? force : !hudEl.classList.contains('hidden');
+  hudEl.classList.toggle('hidden', hide);
+  hudOpenEl.classList.toggle('hidden', !hide);
+}
+document.getElementById('hudclose').addEventListener('click', () => toggleHud(true));
+hudOpenEl.addEventListener('click', () => toggleHud(false));
+if ('ontouchstart' in window)
+  document.querySelector('#lockprompt span').innerHTML =
+    'Drag left half to walk &middot; right half to look';
+canvas.addEventListener('click', () => { if (!touchUsed) canvas.requestPointerLock(); });
+document.addEventListener('pointerlockchange', () => {
+  document.getElementById('lockprompt').classList.toggle('hidden',
+    document.pointerLockElement === canvas || touchUsed);
+});
+document.addEventListener('mousemove', e => {
+  if (document.pointerLockElement !== canvas) return;
+  pendYaw -= e.movementX * 0.0022;
+  pendPitch -= e.movementY * 0.0022;
+});
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyG') SHARED.uGrid.value = 1 - SHARED.uGrid.value;
+  if (e.code === 'KeyH') { toggleHud(); document.getElementById('fps').classList.toggle('hidden'); }
+  if (e.code === 'KeyR') resetSpawn();
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+canvas.addEventListener('touchstart', e => {
+  touchUsed = true;
+  document.getElementById('lockprompt').classList.add('hidden');
+  for (const t of e.changedTouches) {
+    if (t.clientX < window.innerWidth / 2 && !moveTouch)
+      moveTouch = { id: t.identifier, x0: t.clientX, y0: t.clientY };
+    else if (!lookTouch)
+      lookTouch = { id: t.identifier, x: t.clientX, y: t.clientY };
+  }
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    if (moveTouch && t.identifier === moveTouch.id) {
+      touchMX = Math.max(-1, Math.min(1, (t.clientX - moveTouch.x0) / 55));
+      touchMZ = Math.max(-1, Math.min(1, (t.clientY - moveTouch.y0) / 55));
+    } else if (lookTouch && t.identifier === lookTouch.id) {
+      pendYaw -= (t.clientX - lookTouch.x) * 0.005;
+      pendPitch -= (t.clientY - lookTouch.y) * 0.005;
+      lookTouch.x = t.clientX; lookTouch.y = t.clientY;
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  for (const t of e.changedTouches) {
+    if (moveTouch && t.identifier === moveTouch.id) { moveTouch = null; touchMX = touchMZ = 0; }
+    if (lookTouch && t.identifier === lookTouch.id) lookTouch = null;
+  }
+  e.preventDefault();
+}, { passive: false });
+
+// Curvature slider: rebuild placements, keep the player's layout position
+const kslider = document.getElementById('kslider');
+const kval = document.getElementById('kval');
+const tmpA = new M4(), tmpB = new M4(), tmpV = new M4(), tmpM = new M4();
+function setK(newK) {
+  const e = G.elements;
+  const w = Math.max(1, e[15]);
+  const d = Math.acosh(w);
+  let ux = 0, uz = 0, meters = 0, yaw;
+  if (d > 1e-7) {
+    const sh = Math.sinh(d);
+    ux = e[12] / sh; uz = e[14] / sh;
+    meters = d * K;
+    makeBoost(tmpA, ux, 0, uz, d);
+    lorentzInv(tmpB, tmpA).multiply(G);           // pure rotation remainder
+    yaw = Math.atan2(tmpB.elements[8], tmpB.elements[10]);
+  } else {
+    yaw = Math.atan2(e[8], e[10]);
+  }
+  K = newK;
+  SHARED.uInvK.value = 1 / K;
+  G.identity();
+  if (meters > 1e-7) makeBoost(G, ux, 0, uz, meters / K);
+  G.multiply(tmpA.makeRotationY(yaw));
+  for (const o of objects) o.world = placeMat(o.x, o.z, o.yaw);
+  kval.textContent = K + ' m';
+}
+kslider.addEventListener('input', () => setK(parseFloat(kslider.value)));
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+const camWorld = new M4(), V0 = new M4(), V = new M4(), prevG = new M4();
+const CULL_W = Math.cosh(CULL_D);
+const statsEl = document.getElementById('stats');
+const fpsEl = document.getElementById('fps');
+let last = performance.now(), frames = 0, fpsT = last;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  SHARED.uTime.value = now / 1000;
+
+  // look
+  if (pendYaw) { G.multiply(tmpA.makeRotationY(pendYaw)); pendYaw = 0; }
+  if (pendPitch) { pitch = Math.max(-1.5, Math.min(1.5, pitch + pendPitch)); pendPitch = 0; }
+
+  // walk
+  let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + touchMX;
+  let mz = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0) + touchMZ;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 1e-6) {
+    const speed = (keys.ShiftLeft || keys.ShiftRight ? RUN_M : WALK_M) * Math.min(1, ml);
+    prevG.copy(G);
+    G.multiply(makeBoost(tmpA, mx / ml, 0, mz / ml, speed * dt / K));
+    if (Math.acosh(Math.max(1, G.elements[15])) * K > WORLD_EDGE_M) G.copy(prevG);
+  }
+  renormGround(G);
+
+  // camera = ground frame, lifted to eye height, pitched
+  camWorld.copy(G).multiply(makeBoost(tmpA, 0, 1, 0, EYE_M / K));
+  lorentzInv(V0, camWorld);
+  V.makeRotationX(-pitch).multiply(V0);
+  skyMat.uniforms.uPitch.value = pitch;
+
+  groundUni.uRel.value.copy(V);
+  for (const o of objects) {
+    tmpM.multiplyMatrices(V, o.world);
+    const vis = tmpM.elements[15] < CULL_W;
+    o.mesh.visible = vis;
+    if (vis) o.uni.uRel.value.copy(tmpM);
+  }
+
+  renderer.render(scene, camera);
+
+  frames++;
+  if (now - fpsT > 500) {
+    fpsEl.textContent = Math.round(frames * 1000 / (now - fpsT)) + ' fps';
+    frames = 0; fpsT = now;
+    const d = Math.acosh(Math.max(1, G.elements[15]));
+    const mult = d > 0.01 ? Math.sinh(d) / d : 1;
+    statsEl.innerHTML = 'Distance from spawn: <span class="big">' + (d * K).toFixed(0) +
+      ' m</span> &middot; a circle through you around spawn holds <span class="big">&times;' +
+      mult.toFixed(mult < 10 ? 1 : 0) + '</span> the circumference flat space would allow';
+  }
+}
+requestAnimationFrame(frame);
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+// Debug/test hook (harmless in normal use)
+window.__hw = {
+  setPoseLook(xM, zM, tx, tz, pitchDeg = 0) {
+    G = placeMat(xM, zM, 0);
+    // exact geodesic bearing to the target: express target point in local frame
+    const rT = Math.hypot(tx, tz) / K;
+    const hq = rT > 1e-9
+      ? [tx / (rT * K) * Math.sinh(rT), 0, tz / (rT * K) * Math.sinh(rT), Math.cosh(rT)]
+      : [0, 0, 0, 1];
+    const inv = lorentzInv(new M4(), G).elements;
+    const vx = inv[0] * hq[0] + inv[4] * hq[1] + inv[8] * hq[2] + inv[12] * hq[3];
+    const vz = inv[2] * hq[0] + inv[6] * hq[1] + inv[10] * hq[2] + inv[14] * hq[3];
+    G.multiply(new M4().makeRotationY(Math.atan2(vx, vz) + Math.PI));
+    pitch = pitchDeg * Math.PI / 180;
+  },
+  setK(k) { kslider.value = k; setK(k); },
+  getDist() { return Math.acosh(Math.max(1, G.elements[15])) * K; },
+  objects, GEO, SHARED,
+};
+</script>
+</body>
+</html>
