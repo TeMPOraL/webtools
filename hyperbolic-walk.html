@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Hyperbolic Walk V1</title>
+<title>Hyperbolic Walk V2</title>
 <style>
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#dfe7e6;
                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -45,6 +45,15 @@
     color:#cfdde2; border:none; border-radius:999px; width:34px; height:34px;
     font-size:16px; cursor:pointer;
   }
+  #minimap {
+    position:fixed; left:10px; bottom:10px; z-index:9; width:170px; height:170px;
+    border-radius:50%; background:rgba(20,30,34,0.45); pointer-events:none;
+  }
+  #fsbtn {
+    position:fixed; right:10px; bottom:26px; z-index:10; background:rgba(20,30,34,0.6);
+    color:#cfdde2; border:none; border-radius:8px; width:34px; height:34px;
+    font-size:17px; cursor:pointer;
+  }
   details summary { cursor:pointer; color:#9fb4ba; font-size:11.5px; margin-top:6px; }
   details p { margin:6px 0 0; font-size:11.5px; color:#b7c7cc; }
 </style>
@@ -55,13 +64,14 @@
   <h1>Hyperbolic Walk</h1>
   <p class="sub">A first-person stroll through genuinely hyperbolic space (H&sup3;), rendered via the hyperboloid model &rarr; Beltrami&ndash;Klein projection. All straight lines you see are true geodesics.</p>
   <p class="keys"><b>Click</b> to capture mouse &middot; <b>WASD</b>/arrows walk &middot; <b>Shift</b> run &middot; <b>mouse</b> look<br>
-  <b>G</b> ground grid &middot; <b>H</b> hide UI &middot; <b>R</b> return to spawn<br>
-  Touch: <b>left half</b> = move stick, <b>right half</b> = look.</p>
+  <b>G</b> ground grid &middot; <b>M</b> minimap &middot; <b>H</b> hide UI &middot; <b>R</b> return to spawn<br>
+  No pointer lock? Just <b>drag</b> to look. Touch: <b>left half</b> = move stick, <b>right half</b> = look.</p>
   <div class="row">
     <label for="kslider">Curvature radius</label>
     <input id="kslider" type="range" min="6" max="40" step="1" value="12">
     <span id="kval">12 m</span>
   </div>
+  <div class="row"><label style="font-size:12px;color:#c8d6da;white-space:normal"><input type="checkbox" id="mapchk" checked> Minimap <b>(M)</b> &mdash; distances from you are true; it rotating after a loop is holonomy, not a bug</label></div>
   <div id="stats">&nbsp;</div>
   <details>
     <summary>What to look for</summary>
@@ -69,11 +79,16 @@
     &bull; Strafe sideways past a tree: perspective twists in a very non-Euclidean way.<br>
     &bull; Walk a loop around the pond and you return <i>rotated</i> (holonomy) &mdash; direction is path-dependent here.<br>
     &bull; The ground rings are 10&nbsp;m apart; watch how much circumference each successive ring gains.<br>
+    &bull; The marker posts along the shuttle path are exactly 5 m apart &mdash; watch the spacing collapse.<br>
+    &bull; Sight along the stone wall in the east meadow: it is a perfectly straight geodesic, yet from the side it seems to bend away.<br>
+    &bull; The windmill's top squeezes toward the eye-level horizon as you leave &mdash; on a small planet it would sink bottom-first instead. This world is not a sphere; it is the opposite.<br>
     &bull; Drag the curvature slider: small radius = strongly curved, 40 m &asymp; nearly flat.</p>
   </details>
 </div>
 <button id="hudopen" class="hidden" title="Show panel">?</button>
-<div id="lockprompt"><span>Click to look around &middot; WASD to walk</span></div>
+<canvas id="minimap" width="340" height="340"></canvas>
+<button id="fsbtn" title="Fullscreen">&#x26F6;</button>
+<div id="lockprompt"><span>Click or drag to look around &middot; WASD to walk</span></div>
 <div id="fps"></div>
 <script type="module">
 import * as THREE from 'https://esm.sh/three@0.172.0';
@@ -170,9 +185,10 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 
 const SHARED = {
   uInvK: { value: 1 / K },
+  uKm:   { value: K },
   uSun:  { value: new THREE.Vector3(0.42, 0.8, 0.28) },
   uFogC: { value: new THREE.Color(0xe3ebe9) },
-  uFogD: { value: 0.055 },
+  uFogD: { value: 0.045 },
   uTime: { value: 0 },
   uGrid: { value: 1 },
 };
@@ -186,9 +202,8 @@ out vec3 vColor;
 out vec3 vNormal;
 out float vDist;
 #ifdef GROUND
-in float aWater;
-out vec2 vLocal;
-out float vWater;
+uniform mat4 uWorldM;
+out vec4 vWorld;
 #endif
 void main() {
   vec3 pm = position * uSize;       // local meters
@@ -203,8 +218,12 @@ void main() {
   vColor = aCol;
   vNormal = normal;
 #ifdef GROUND
-  vLocal = pm.xz;
-  vWater = aWater;
+  // World-frame hyperboloid position. The ground disk is CAMERA-centered (its
+  // uRel is the closed-form eye transform, so no giant-number cancellation can
+  // crumple nearby geometry); uWorldM carries it back to world coordinates
+  // purely for painting. Interpolated projectively, vWorld reconstructs exact
+  // plane points per fragment.
+  vWorld = uWorldM * h;
 #endif
   gl_Position = projectionMatrix * vec4(klein, 1.0);
 }`;
@@ -217,33 +236,90 @@ uniform float uFogD;
 uniform vec3 uTint;
 uniform float uTime;
 uniform float uGrid;
+uniform float uKm;
 in vec3 vColor;
 in vec3 vNormal;
 in float vDist;
 #ifdef GROUND
-in vec2 vLocal;
-in float vWater;
+in vec4 vWorld;
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2(i), hash2(i + vec2(1, 0)), f.x),
+             mix(hash2(i + vec2(0, 1)), hash2(i + vec2(1, 1)), f.x), f.y);
+}
+float segd(vec2 p, vec2 a, vec2 b) {
+  vec2 ab = b - a;
+  float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+  return length(p - a - ab * t);
+}
 #endif
 void main() {
   vec3 n = normalize(vNormal);
   if (!gl_FrontFacing) n = -n;
   float dl = max(dot(n, normalize(uSun)), 0.0);
-  vec3 col = vColor * uTint * (0.72 + 0.28 * dl);
+  vec3 albedo;
 #ifdef GROUND
-  if (vWater > 0.45) {
-    float sp = sin(vLocal.x * 1.4 + uTime * 1.6) * sin(vLocal.y * 1.1 - uTime * 1.2)
-             + 0.5 * sin((vLocal.x + vLocal.y) * 0.9 + uTime * 2.3);
-    col += vec3(0.03, 0.045, 0.055) * sp;
+  // Renormalize the interpolated hyperboloid point back onto the surface: this
+  // yields the EXACT world position of the fragment on the geodesic plane, so
+  // all painting below is resolution-independent - no origin-centered
+  // "triangle fan" degradation.
+  float n2 = vWorld.w * vWorld.w - dot(vWorld.xyz, vWorld.xyz);   // == 1 when reliable
+  vec4 q = vWorld / sqrt(max(n2, 1e-12));
+  float dO = acosh(max(q.w, 1.0));          // hyperbolic distance from world origin
+  float rr = dO * uKm;                      // ...in meters
+  float lxz = length(q.xz);
+  vec2 P = (lxz > 1e-6 ? q.xz / lxz : vec2(0.0)) * rr;  // layout meters
+  vec3 base = vec3(0.663, 0.788, 0.549);
+  if (dO > 12.0 || n2 < 0.5 || n2 > 2.0) {  // beyond fp32 reconstruction range: plain grass
+    albedo = base;
+  } else {
+    base = mix(base, vec3(0.737, 0.812, 0.514),
+               (0.5 + 0.5 * sin(P.x * 0.045 - P.y * 0.06 + 1.0)) * 0.35);
+    base += (vnoise(P * 0.55) - 0.5) * 0.07;
+    float tf = clamp((-22.0 - P.x) / 12.0, 0.0, 1.0);              // forest floor
+    base = mix(base, vec3(0.494, 0.612, 0.427), tf * 0.85);
+    float dc = length(P - vec2(6.0, -52.0));                       // shuttle clearing
+    base = mix(base, vec3(0.729, 0.816, 0.580), max(0.0, 1.0 - dc / 14.0) * 0.8);
+    if (P.x >= 18.0 && P.x <= 44.0 && P.y >= -6.0 && P.y <= 18.0) { // wheat field
+      base = vec3(0.867, 0.788, 0.494);
+      if (mod(floor(P.y / 2.2), 2.0) < 0.5) base *= 0.94;
+      base += (vnoise(P * 0.9) - 0.5) * 0.05;
+    }
+    float dp = min(segd(P, vec2(2.0, 0.0), vec2(26.0, 3.0)),       // dirt paths
+                   segd(P, vec2(0.0, -3.0), vec2(5.0, -46.0)));
+    base = mix(base, vec3(0.769, 0.663, 0.478), 1.0 - smoothstep(1.2, 1.8, dp));
+    float e = pow((P.x + 12.0) / 9.5, 2.0) + pow((P.y - 18.0) / 6.5, 2.0);  // pond
+    float water = 0.0;
+    base = mix(base, vec3(0.725, 0.675, 0.510),
+               (1.0 - smoothstep(1.0, 1.35, e)) * step(1.0, e) * 0.6);
+    if (P.y > -80.0 && P.y < 20.0) {                               // stream + banks
+      float sx = -12.0 + (18.0 - P.y) * 0.12 + 6.0 * sin((18.0 - P.y) * 0.09);
+      float hw = 1.6 + 0.5 * sin(P.y * 0.23);
+      float dxs = abs(P.x - sx);
+      base = mix(base, vec3(0.725, 0.675, 0.510),
+                 (1.0 - smoothstep(hw, hw + 1.1, dxs)) * step(hw, dxs) * 0.6);
+      if (dxs < hw) { base = vec3(0.392, 0.518, 0.722) + (vnoise(P * 1.3) - 0.5) * 0.05; water = 1.0; }
+    }
+    if (e < 1.0) { base = mix(vec3(0.498, 0.639, 0.800), vec3(0.369, 0.510, 0.678), 1.0 - e); water = 1.0; }
+    if (water > 0.5) {
+      float sp = sin(P.x * 1.4 + uTime * 1.6) * sin(P.y * 1.1 - uTime * 1.2)
+               + 0.5 * sin((P.x + P.y) * 0.9 + uTime * 2.3);
+      base += vec3(0.03, 0.045, 0.055) * sp;
+    } else if (uGrid > 0.5) {
+      // rings of constant hyperbolic distance from spawn, every 10 m
+      float fr = abs(fract(rr / 10.0 + 0.5) - 0.5) * 10.0;
+      float wr = fwidth(rr) + 0.03;
+      float ring = (1.0 - smoothstep(0.08, 0.08 + wr, fr)) * clamp(0.3 / wr, 0.0, 1.0);
+      base *= 1.0 - 0.09 * ring;
+    }
+    albedo = base;
   }
-  if (uGrid > 0.5 && vWater < 0.45) {
-    // rings of constant hyperbolic distance from spawn, every 10 m
-    float rr = length(vLocal);
-    float fr = abs(fract(rr / 10.0 + 0.5) - 0.5) * 10.0;
-    float wr = fwidth(rr) + 0.03;
-    float ring = (1.0 - smoothstep(0.08, 0.08 + wr, fr)) * clamp(0.3 / wr, 0.0, 1.0);
-    col *= 1.0 - 0.09 * ring;
-  }
+#else
+  albedo = vColor * uTint;
 #endif
+  vec3 col = albedo * (0.72 + 0.28 * dl);
   float fog = 1.0 - exp(-uFogD * vDist * vDist);
   col = mix(col, uFogC, clamp(fog, 0.0, 1.0));
   outColor = vec4(col, 1.0);
@@ -261,6 +337,7 @@ function makeMat(ground) {
       uRel:  { value: new M4() },
       uSize: { value: 1 },
       uTint: { value: new THREE.Vector3(1, 1, 1) },
+      ...(ground ? { uWorldM: { value: new M4() } } : {}),
       ...SHARED,
     },
   });
@@ -480,39 +557,6 @@ function segDist(px, pz, ax, az, bx, bz) {
 const FIELD = { x0: 18, z0: -6, x1: 44, z1: 18 };
 const CLEAR = { x: 6, z: -52, r: 14 };
 
-function groundSample(x, z) {
-  const c = new THREE.Color(0xa9c98c);
-  c.lerp(tmpC.setHex(0xbccf83), (0.5 + 0.5 * Math.sin(x * 0.045 - z * 0.06 + 1.0)) * 0.35);
-  c.offsetHSL(0, 0, (hash2(x * 0.37, z * 0.37) - 0.5) * 0.07);
-  let water = 0;
-  const tf = Math.max(0, Math.min(1, (-22 - x) / 12));                      // forest floor (west)
-  if (tf > 0) c.lerp(tmpC.setHex(0x7e9c6d), tf * 0.85);
-  const dc = Math.hypot(x - CLEAR.x, z - CLEAR.z);                          // shuttle clearing
-  if (dc < CLEAR.r) c.lerp(tmpC.setHex(0xbad094), (1 - dc / CLEAR.r) * 0.8);
-  if (x >= FIELD.x0 && x <= FIELD.x1 && z >= FIELD.z0 && z <= FIELD.z1) {   // wheat field
-    c.setHex(0xddc97e);
-    if (((Math.floor(z / 2.2) % 2) + 2) % 2 === 0) c.multiplyScalar(0.94);
-    c.offsetHSL(0, 0, (hash2(x * 0.53, z * 0.53) - 0.5) * 0.04);
-  }
-  for (const [ax, az, bx, bz] of [[2, 0, 26, 3], [0, -3, 5, -46]]) {        // dirt paths
-    const d = segDist(x, z, ax, az, bx, bz);
-    if (d < 1.8) {
-      const t = d < 1.2 ? 1 : (1.8 - d) / 0.6;
-      c.lerp(tmpC.setHex(0xc4a97a), t);
-    }
-  }
-  const e = ((x + 12) / 9.5) ** 2 + ((z - 18) / 6.5) ** 2;                  // pond
-  if (e < 1.35 && e >= 1) c.lerp(tmpC.setHex(0xb9ac82), (1.35 - e) / 0.35 * 0.6);
-  if (z > -80 && z < 20) {                                                  // stream + banks
-    const hw = 1.6 + 0.5 * Math.sin(z * 0.23);
-    const dxs = Math.abs(x - streamX(z));
-    if (dxs < hw + 1.1 && dxs >= hw) c.lerp(tmpC.setHex(0xb9ac82), (1 - (dxs - hw) / 1.1) * 0.6);
-    if (dxs < hw) { c.setHex(0x6484b8); c.offsetHSL(0, 0, (hash2(x, z) - 0.5) * 0.03); water = 1; }
-  }
-  if (e < 1) { c.setHex(0x7fa3cc).lerp(tmpC.setHex(0x5e82ad), 1 - e); water = 1; }
-  return { c, water };
-}
-
 function isWaterAt(x, z) {
   const e = ((x + 12) / 9.5) ** 2 + ((z - 18) / 6.5) ** 2;
   if (e < 1.3) return true;
@@ -524,18 +568,20 @@ function isOnPath(x, z) {
 }
 
 function buildGround() {
-  const radii = [0];
-  for (let r = 2; r <= 80; r += 2) radii.push(r);
-  for (let r = 90; r <= 250; r += 10) radii.push(r);
-  const SEG = 96;
-  const P = [], N = [], C = [], W = [], I = [];
+  // Camera-centered disk in CURVATURE UNITS (the material's uSize is set to K so
+  // the shader's meters-to-units scaling cancels). Geometry only: the plane's
+  // Klein image is exact for any tessellation and all painting happens
+  // per-fragment, so this stays coarse - just denser near the viewer, where
+  // the vWorld varying needs the most interpolation precision.
+  const radii = [0, 0.05, 0.1, 0.2, 0.35, 0.55, 0.8, 1.1, 1.5, 2.0,
+                 2.6, 3.3, 4.2, 5.2, 6.5, 8.0, 10.0, 12.0];
+  const SEG = 64;
+  const P = [], N = [], I = [];
   for (let i = 0; i < radii.length; i++) {
     for (let a = 0; a < SEG; a++) {
       const th = a / SEG * Math.PI * 2;
-      const x = radii[i] * Math.cos(th), z = radii[i] * Math.sin(th);
-      P.push(x, 0, z); N.push(0, 1, 0);
-      const s = groundSample(x, z);
-      C.push(s.c.r, s.c.g, s.c.b); W.push(s.water);
+      P.push(radii[i] * Math.cos(th), 0, radii[i] * Math.sin(th));
+      N.push(0, 1, 0);
     }
   }
   for (let i = 0; i < radii.length - 1; i++) {
@@ -548,8 +594,6 @@ function buildGround() {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-  g.setAttribute('aCol', new THREE.Float32BufferAttribute(C, 3));
-  g.setAttribute('aWater', new THREE.Float32BufferAttribute(W, 1));
   g.setIndex(I);
   return g;
 }
@@ -558,14 +602,15 @@ function buildGround() {
 // Object placement
 // ---------------------------------------------------------------------------
 const objects = [];   // { mesh, x, z, yaw, world }
-function place(geo, xM, zM, yaw = 0, size = 1, tint = null) {
+function place(geo, xM, zM, yaw = 0, size = 1, tint = null, rebuild = null) {
   const mat = makeMat(false);
   mat.uniforms.uSize.value = size;
   if (tint) mat.uniforms.uTint.value.set(tint[0], tint[1], tint[2]);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   scene.add(mesh);
-  const o = { mesh, x: xM, z: zM, yaw, world: placeMat(xM, zM, yaw), uni: mat.uniforms };
+  const o = { mesh, x: xM, z: zM, yaw, rebuild,
+              world: rebuild ? rebuild() : placeMat(xM, zM, yaw), uni: mat.uniforms };
   objects.push(o);
   return o;
 }
@@ -574,6 +619,7 @@ const groundMesh = new THREE.Mesh(buildGround(), makeMat(true));
 groundMesh.frustumCulled = false;
 scene.add(groundMesh);
 const groundUni = groundMesh.material.uniforms;
+groundUni.uSize.value = K;
 
 const GEO = {
   conifer: coniferGeo(), conifer2: coniferGeo(), deciduous: deciduousGeo(),
@@ -665,6 +711,61 @@ for (const [x, z, s] of [[-3, -38, 0.9], [9, -59, 1.3], [-22, 3, 0.8], [12, -15,
                          [-31, -19, 1.1], [2, 24, 0.7]])
   place(GEO.rock, x, z, rng() * 6.28, s);
 
+// Marker posts flanking the shuttle path every 5 m: identical, evenly spaced
+// objects make the exponential distance compression directly readable.
+GEO.post = (() => {
+  const b = partsBuilder();
+  b.add(new THREE.BoxGeometry(0.16, 0.95, 0.16), 0x8a7052, xf(0, 0.475, 0), 0.03);
+  b.add(new THREE.BoxGeometry(0.2, 0.14, 0.2), 0xe8e2d4, xf(0, 1.02, 0));
+  return b.build();
+})();
+{
+  const ax = 0, az = -3, bx = 5, bz = -46;
+  const len = Math.hypot(bx - ax, bz - az);
+  const ex = (bx - ax) / len, ez = (bz - az) / len;
+  for (let t = 4; t < len - 2; t += 5)
+    for (const s of [-1, 1])
+      place(GEO.post, ax + ex * t - ez * s * 2.0, az + ez * t + ex * s * 2.0,
+            Math.atan2(-ex, -ez));
+}
+
+// Windmill: a tall landmark. Watch its top squeeze toward the eye-level horizon
+// as you walk away - on a small planet it would sink bottom-first instead.
+GEO.windmill = (() => {
+  const b = partsBuilder();
+  b.add(new THREE.CylinderGeometry(1.0, 1.7, 9.0, 6), 0xd9d0c1, xf(0, 4.5, 0), 0.02);
+  b.add(new THREE.ConeGeometry(1.35, 1.6, 6), 0x8b7867, xf(0, 9.8, 0));
+  b.add(new THREE.BoxGeometry(0.5, 0.5, 0.6), 0x6b5a48, xf(0, 8.6, 1.15));
+  for (let i = 0; i < 4; i++) {
+    const m = new M4().makeTranslation(0, 8.6, 1.5)
+      .multiply(new M4().makeRotationZ(i * Math.PI / 2 + 0.5))
+      .multiply(new M4().makeTranslation(0, 2.15, 0));
+    b.add(new THREE.BoxGeometry(0.55, 4.0, 0.1), 0xc4b491, m, 0.03);
+  }
+  return b.build();
+})();
+place(GEO.windmill, 14, 8, -2.2);
+
+// Dry-stone wall laid along a true geodesic that does NOT pass through the
+// origin: each segment is hyperbolically translated along the wall's own axis.
+// Sight along it - dead straight; view it from the side - it "bends away".
+GEO.wall = (() => {
+  const b = partsBuilder();
+  b.add(new THREE.BoxGeometry(0.55, 0.95, 4.1), 0x9aa3a4, xf(0, 0.475, 0), 0.05);
+  b.add(new THREE.BoxGeometry(0.65, 0.22, 4.1), 0x8f9899, xf(0, 1.05, 0), 0.05);
+  return b.build();
+})();
+for (let i = 0; i < 10; i++) {
+  const off = (i - 4.5) * 4.0;
+  place(GEO.wall, 0, 0, 0, 1, null,
+        () => placeMat(6, 25, -1.33).multiply(makeBoost(new M4(), 0, 0, 1, off / K)));
+}
+
+// A few extra-tall pines at mid distances for vertical reference
+place(GEO.conifer, -20, -18, 0.5, 2.0);
+place(GEO.conifer, -30, 36, 2.1, 1.9);
+place(GEO.conifer, 26, -28, 1.0, 2.1);
+
 // ---------------------------------------------------------------------------
 // Player state and controls
 // ---------------------------------------------------------------------------
@@ -693,19 +794,43 @@ hudOpenEl.addEventListener('click', () => toggleHud(false));
 if ('ontouchstart' in window)
   document.querySelector('#lockprompt span').innerHTML =
     'Drag left half to walk &middot; right half to look';
-canvas.addEventListener('click', () => { if (!touchUsed) canvas.requestPointerLock(); });
+// Pointer lock where available (may fail, e.g. Samsung Internet) with a
+// universal drag-to-look fallback.
+let dragLook = null;
+canvas.addEventListener('click', () => {
+  if (touchUsed) return;
+  try {
+    const p = canvas.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  } catch (err) { /* fall back to drag-look */ }
+});
 document.addEventListener('pointerlockchange', () => {
   document.getElementById('lockprompt').classList.toggle('hidden',
     document.pointerLockElement === canvas || touchUsed);
 });
+canvas.addEventListener('mousedown', e => {
+  if (document.pointerLockElement !== canvas) dragLook = { x: e.clientX, y: e.clientY };
+  document.getElementById('lockprompt').classList.add('hidden');
+});
+window.addEventListener('mouseup', () => { dragLook = null; });
 document.addEventListener('mousemove', e => {
-  if (document.pointerLockElement !== canvas) return;
-  pendYaw -= e.movementX * 0.0022;
-  pendPitch -= e.movementY * 0.0022;
+  if (document.pointerLockElement === canvas) {
+    pendYaw -= e.movementX * 0.0022;
+    pendPitch -= e.movementY * 0.0022;
+  } else if (dragLook) {
+    pendYaw -= (e.clientX - dragLook.x) * 0.0035;
+    pendPitch -= (e.clientY - dragLook.y) * 0.0035;
+    dragLook = { x: e.clientX, y: e.clientY };
+  }
+});
+document.getElementById('fsbtn').addEventListener('click', () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen().catch(() => {});
 });
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyG') SHARED.uGrid.value = 1 - SHARED.uGrid.value;
+  if (e.code === 'KeyM') setMap(!mapOn);
   if (e.code === 'KeyH') { toggleHud(); document.getElementById('fps').classList.toggle('hidden'); }
   if (e.code === 'KeyR') resetSpawn();
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -766,13 +891,106 @@ function setK(newK) {
   }
   K = newK;
   SHARED.uInvK.value = 1 / K;
+  SHARED.uKm.value = K;
+  groundUni.uSize.value = K;
   G.identity();
   if (meters > 1e-7) makeBoost(G, ux, 0, uz, meters / K);
   G.multiply(tmpA.makeRotationY(yaw));
-  for (const o of objects) o.world = placeMat(o.x, o.z, o.yaw);
+  for (const o of objects) o.world = o.rebuild ? o.rebuild() : placeMat(o.x, o.z, o.yaw);
   kval.textContent = K + ' m';
 }
 kslider.addEventListener('input', () => setK(parseFloat(kslider.value)));
+
+// ---------------------------------------------------------------------------
+// Minimap: azimuthal equidistant projection centered on the player, heading-up.
+// Distances from the player are true hyperbolic distances; bearings are true.
+// Under holonomy the whole map rotates as you walk loops - honestly.
+// ---------------------------------------------------------------------------
+const mm = document.getElementById('minimap');
+const mctx = mm.getContext('2d');
+let mapOn = true;
+const MDMAX = 6;                 // map edge = 6 curvature units from player
+const minv = new M4();
+const mapStream = [];
+for (let z = 18; z >= -78; z -= 4) mapStream.push([streamX(z), z]);
+const mapPond = [];
+for (let i = 0; i <= 24; i++) {
+  const a = i / 24 * Math.PI * 2;
+  mapPond.push([-12 + 9.5 * Math.cos(a), 18 + 6.5 * Math.sin(a)]);
+}
+const mapField = [[18, -6], [44, -6], [44, 18], [18, 18], [18, -6]];
+const mapPaths = [[[2, 0], [26, 3]], [[0, -3], [5, -46]]];
+function mapXY(px, py, pz, pw) {   // world hyperboloid 4-vector -> map coords
+  const e = minv.elements;
+  const lx = e[0] * px + e[4] * py + e[8] * pz + e[12] * pw;
+  const lz = e[2] * px + e[6] * py + e[10] * pz + e[14] * pw;
+  const lw = e[3] * px + e[7] * py + e[11] * pz + e[15] * pw;
+  const d = Math.acosh(Math.max(1, lw));
+  const b = Math.atan2(lx, -lz);
+  const r = Math.min(d / MDMAX, 1.04) * 160;
+  return [170 + Math.sin(b) * r, 170 - Math.cos(b) * r, d];
+}
+function mapPt(x, z) {             // layout meters -> map coords
+  const rM = Math.hypot(x, z), d = rM / K;
+  const sh = rM > 1e-9 ? Math.sinh(d) / rM : 0;
+  return mapXY(x * sh, 0, z * sh, Math.cosh(d));
+}
+function mapPoly(pts) {
+  mctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const p = mapPt(pts[i][0], pts[i][1]);
+    if (i === 0) mctx.moveTo(p[0], p[1]); else mctx.lineTo(p[0], p[1]);
+  }
+}
+let mapStyle = null;               // geometry -> [color, dot size]; built lazily (GEO is complete by then)
+function drawMap() {
+  if (!mapStyle) mapStyle = new Map([
+    [GEO.conifer, ['#39603a', 3]], [GEO.conifer2, ['#39603a', 3]],
+    [GEO.deciduous, ['#4f7a44', 3.4]], [GEO.bush, ['#7cab6a', 2]],
+    [GEO.rock, ['#9aa2a3', 2.4]], [GEO.hay, ['#d9bd6e', 2.6]],
+    [GEO.barn, ['#b0714b', 7]], [GEO.silo, ['#c3c9be', 4]],
+    [GEO.shuttle, ['#e8544a', 7]], [GEO.windmill, ['#f0e6d2', 5]],
+    [GEO.wall, ['#aab3b4', 2.6]], [GEO.post, ['#d9c69c', 1.6]],
+    [GEO.fenceSeg, ['#8a7052', 1.6]],
+  ]);
+  lorentzInv(minv, G);
+  mctx.clearRect(0, 0, 340, 340);
+  mctx.save();
+  mctx.beginPath(); mctx.arc(170, 170, 166, 0, 7); mctx.clip();
+  mctx.fillStyle = 'rgba(58,74,56,0.9)'; mctx.fillRect(0, 0, 340, 340);
+  mctx.fillStyle = 'rgba(221,201,126,0.45)'; mapPoly(mapField); mctx.fill();
+  mctx.strokeStyle = 'rgba(196,169,122,0.9)'; mctx.lineWidth = 3;
+  for (const p of mapPaths) { mapPoly(p); mctx.stroke(); }
+  mctx.strokeStyle = '#6484b8'; mctx.lineWidth = 5; mctx.lineJoin = 'round';
+  mapPoly(mapStream); mctx.stroke();
+  mctx.fillStyle = '#7fa3cc'; mapPoly(mapPond); mctx.fill();
+  for (const o of objects) {
+    const st = mapStyle.get(o.mesh.geometry);
+    if (!st) continue;
+    const w = o.world.elements;
+    const [mx, my, d] = mapXY(w[12], w[13], w[14], w[15]);
+    if (d > MDMAX) continue;
+    mctx.fillStyle = st[0];
+    mctx.fillRect(mx - st[1] / 2, my - st[1] / 2, st[1], st[1]);
+  }
+  const sp = mapXY(0, 0, 0, 1);    // spawn marker
+  if (sp[2] <= MDMAX) {
+    mctx.strokeStyle = '#ffffff'; mctx.lineWidth = 1.5;
+    mctx.beginPath(); mctx.arc(sp[0], sp[1], 5, 0, 7); mctx.stroke();
+  }
+  mctx.restore();
+  mctx.fillStyle = '#ffffff';      // player arrow (always center, heading up)
+  mctx.beginPath();
+  mctx.moveTo(170, 161); mctx.lineTo(176, 177); mctx.lineTo(170, 172);
+  mctx.lineTo(164, 177); mctx.closePath(); mctx.fill();
+}
+const mapchk = document.getElementById('mapchk');
+function setMap(on) {
+  mapOn = on;
+  mm.classList.toggle('hidden', !on);
+  mapchk.checked = on;
+}
+mapchk.addEventListener('change', () => setMap(mapchk.checked));
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -781,7 +999,7 @@ const camWorld = new M4(), V0 = new M4(), V = new M4(), prevG = new M4();
 const CULL_W = Math.cosh(CULL_D);
 const statsEl = document.getElementById('stats');
 const fpsEl = document.getElementById('fps');
-let last = performance.now(), frames = 0, fpsT = last;
+let last = performance.now(), frames = 0, fpsT = last, lastMap = 0;
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -811,7 +1029,11 @@ function frame(now) {
   V.makeRotationX(-pitch).multiply(V0);
   skyMat.uniforms.uPitch.value = pitch;
 
-  groundUni.uRel.value.copy(V);
+  // ground disk rides with the camera: rel = Rx(-pitch) * By(-eyeHeight), exact
+  // in closed form at any distance from the origin (no cancellation blow-up)
+  groundUni.uRel.value.makeRotationX(-pitch)
+    .multiply(makeBoost(tmpB, 0, 1, 0, -EYE_M / K));
+  groundUni.uWorldM.value.copy(G);
   for (const o of objects) {
     tmpM.multiplyMatrices(V, o.world);
     const vis = tmpM.elements[15] < CULL_W;
@@ -820,6 +1042,8 @@ function frame(now) {
   }
 
   renderer.render(scene, camera);
+
+  if (mapOn && now - lastMap > 100) { lastMap = now; drawMap(); }
 
   frames++;
   if (now - fpsT > 500) {
@@ -857,6 +1081,15 @@ window.__hw = {
   },
   setK(k) { kslider.value = k; setK(k); },
   getDist() { return Math.acosh(Math.max(1, G.elements[15])) * K; },
+  getYaw() {
+    const e = G.elements, d = Math.acosh(Math.max(1, e[15]));
+    let R = G;
+    if (d > 1e-7) {
+      const sh = Math.sinh(d);
+      R = lorentzInv(new M4(), makeBoost(new M4(), e[12] / sh, 0, e[14] / sh, d)).multiply(G);
+    }
+    return Math.atan2(R.elements[8], R.elements[10]);
+  },
   objects, GEO, SHARED,
 };
 </script>
