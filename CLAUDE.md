@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A collection of standalone, single-file browser utilities. Each tool is one
 self-contained `.html` file at the repo root with inline `<style>` and
-`<script>` — there is no build system, package manager, test suite, linter, or
-CI. The `README` is intentionally just `TBD`.
+`<script>` — there is no build system, package manager, test suite, or
+linter. The only CI is a GitHub Pages deploy/preview workflow (see
+"Deployment and previews"); it builds nothing, it just publishes the files
+as-is. The `README` is intentionally just `TBD`.
 
 ## Running and testing
 
@@ -21,6 +23,29 @@ python3 -m http.server 8000   # then open http://localhost:8000/<tool>.html
 
 "Testing" means manually exercising the tool in a browser — there are no
 automated tests. State explicitly when a change could not be browser-verified.
+
+## Deployment and previews
+
+The site is hosted on GitHub Pages at `https://temporal.github.io/webtools/`.
+`.github/workflows/pages.yml` builds the site and force-pushes it to a
+generated **`gh-pages`** branch. The repo's Pages **Source** must be
+**"Deploy from a branch" → branch `gh-pages` / `(root)`** (Settings →
+Pages) — *not* "GitHub Actions". (The official `deploy-pages` action
+deploys through the `github-pages` environment, which is default-branch
+only and so cannot publish from PR runs; a token push to `gh-pages` has
+no such gate.) `gh-pages` is a build artifact: it is force-pushed as a
+single commit every run — never edit it by hand or treat it as source.
+
+- `main` is published at the site **root**.
+- The **most recently pushed open PR** (same-repo branches only; not forks)
+  is published at a single **stable** path: `/preview/` — e.g.
+  `https://temporal.github.io/webtools/preview/qr.html`. The path never
+  encodes the PR/branch, deliberately, so repeated on-the-go testing does
+  not accumulate per-PR URLs in browser history. Only one PR previews at a
+  time (latest push wins); `/preview/_meta.txt` records which one is live.
+- All tools use relative links, so they work unchanged under `/preview/`.
+  Do not introduce absolute/root-relative (`/foo.html`) URLs — they break
+  the subpath preview and the project-pages base path.
 
 ## Architecture and conventions
 

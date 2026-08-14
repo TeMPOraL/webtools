@@ -1,0 +1,118 @@
+name: Publish site + PR preview to gh-pages
+
+# Builds the full site and force-publishes it to the `gh-pages` branch:
+#   * `main`                       -> site root
+#   * most-recently-pushed open PR -> a STABLE `/preview/` path
+# A token push to a branch has no environment gate, so this works from
+# PR runs (unlike actions/deploy-pages). Requires the repo's Pages
+# "Source" to be "Deploy from a branch" -> branch `gh-pages` / root.
+#
+# `/preview/` never encodes the PR/branch, so on-the-go phone testing
+# reuses one URL instead of accumulating per-PR URLs in history.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+# Serialize publishes so concurrent force-pushes can't race.
+concurrency:
+  group: gh-pages-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Skip fork PRs: their GITHUB_TOKEN is read-only and can't push.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (site root)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+
+      - name: Determine preview ref
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ref=""
+          label=""
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+             && [ "${{ github.event.action }}" != "closed" ]; then
+            ref="${{ github.event.pull_request.head.sha }}"
+            ref_b="${{ github.event.pull_request.head.ref }}"
+            label="PR #${{ github.event.pull_request.number }} ($ref_b)"
+          else
+            # main push / manual / PR closed: fall back to the most
+            # recently updated PR that is still open, so a main deploy
+            # does not wipe an active preview.
+            json="$(gh pr list --repo '${{ github.repository }}' --state open \
+                      --json number,headRefName,headRefOid,updatedAt \
+                      --jq 'sort_by(.updatedAt) | reverse | .[0] // empty')"
+            if [ -n "$json" ]; then
+              ref="$(echo "$json" | jq -r '.headRefOid')"
+              num="$(echo "$json" | jq -r '.number')"
+              brn="$(echo "$json" | jq -r '.headRefName')"
+              label="PR #$num ($brn)"
+            fi
+          fi
+          echo "ref=$ref"     >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout preview ref
+        if: steps.prev.outputs.ref != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.prev.outputs.ref }}
+          path: preview
+
+      - name: Assemble site
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          rsync -a --delete \
+            --exclude='.git' --exclude='.github' --exclude='_site' \
+            main/ _site/
+          touch _site/.nojekyll
+          if [ -n "${{ steps.prev.outputs.ref }}" ]; then
+            mkdir -p _site/preview
+            rsync -a --delete \
+              --exclude='.git' --exclude='.github' \
+              preview/ _site/preview/
+            {
+              echo "Live preview: ${{ steps.prev.outputs.label }}"
+              echo "Commit:       ${{ steps.prev.outputs.ref }}"
+              echo "Deployed:     $(date -u +%FT%TZ)"
+            } > _site/preview/_meta.txt
+            echo "### Preview: ${{ steps.prev.outputs.label }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "Stable base: \`/webtools/preview/\` (e.g. \`/webtools/preview/qr.html\`)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No open PR — /preview/ not published this run." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Publish to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd _site
+          git init -q
+          git checkout -q -b gh-pages
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Publish: main + ${{ steps.prev.outputs.label || 'no preview' }} (${GITHUB_SHA::7})"
+          git push -f \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
