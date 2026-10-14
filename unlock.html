@@ -15,6 +15,7 @@
             --primary-hover: #2563eb;
             --error: #ef4444;
             --success: #10b981;
+            --warning: #f59e0b;
         }
 
         body {
@@ -114,6 +115,42 @@
             border-color: var(--primary);
         }
 
+        input[type="password"].has-noise {
+            border-color: var(--warning);
+        }
+
+        .password-notice {
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            border: 1px solid;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
+        .password-notice.info {
+            color: #93c5fd;
+            background-color: rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.35);
+        }
+
+        .password-notice.warning {
+            color: #fbbf24;
+            background-color: rgba(245, 158, 11, 0.1);
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        .password-notice button,
+        .password-notice button:hover:not(:disabled) {
+            width: auto;
+            padding: 0;
+            margin-left: 0.25rem;
+            background: none;
+            color: inherit;
+            font-size: inherit;
+            text-decoration: underline;
+        }
+
         button {
             width: 100%;
             padding: 0.75rem;
@@ -167,6 +204,10 @@
     <div class="input-group">
         <label for="password">Document Password</label>
         <input type="password" id="password" placeholder="Enter the current password">
+        <div class="password-notice" id="passwordNotice" hidden>
+            <span id="passwordNoticeText"></span>
+            <button type="button" id="passwordNoticeAction"></button>
+        </div>
     </div>
 
     <button id="actionBtn" disabled>Unlock & Download</button>
@@ -188,8 +229,13 @@
     const passwordInput = document.getElementById('password');
     const actionBtn = document.getElementById('actionBtn');
     const statusText = document.getElementById('status');
+    const passwordNotice = document.getElementById('passwordNotice');
+    const passwordNoticeText = document.getElementById('passwordNoticeText');
+    const passwordNoticeAction = document.getElementById('passwordNoticeAction');
 
     let currentFile = null;
+    // Set when a paste was auto-trimmed; cleared as soon as the field is edited further
+    let pasteFix = null;
 
     dropZone.addEventListener('click', () => fileInput.click());
     
@@ -214,8 +260,130 @@
         }
     });
 
-    passwordInput.addEventListener('input', updateButtonState);
+    passwordInput.addEventListener('input', onPasswordChange);
+    passwordInput.addEventListener('paste', onPasswordPaste);
+    passwordNoticeAction.addEventListener('click', onPasswordNoticeAction);
     actionBtn.addEventListener('click', processFile);
+
+    // Whitespace plus invisible characters (zero-width spaces/joiners, word joiner,
+    // soft hyphen) that tend to stick to text copied from e-mails and web pages.
+    const LEADING_NOISE = /^[\s\u00ad\u180e\u200b-\u200d\u2060]*/;
+    const TRAILING_NOISE = /[\s\u00ad\u180e\u200b-\u200d\u2060]*$/;
+
+    const NOISE_NAMES = {
+        ' ': 'space',
+        '\t': 'tab',
+        '\n': 'line break',
+        '\r': 'line break',
+        '\u2028': 'line break',
+        '\u2029': 'line break',
+        '\u00a0': 'non-breaking space',
+        '\u202f': 'non-breaking space',
+        '\u200b': 'zero-width space',
+        '\ufeff': 'invisible character'
+    };
+
+    function splitEdges(text) {
+        const lead = text.match(LEADING_NOISE)[0];
+        const rest = text.slice(lead.length);
+        const trail = rest.match(TRAILING_NOISE)[0];
+        return { lead, core: rest.slice(0, rest.length - trail.length), trail };
+    }
+
+    function describeNoise(noise) {
+        const counts = new Map();
+        for (const ch of noise.replace(/\r\n/g, '\n')) {
+            const name = NOISE_NAMES[ch] || (/\s/.test(ch) ? 'unusual space' : 'invisible character');
+            counts.set(name, (counts.get(name) || 0) + 1);
+        }
+        return [...counts].map(([name, n]) => `${n} ${name}${n === 1 ? '' : 's'}`).join(' + ');
+    }
+
+    function describeEdges(lead, trail) {
+        const parts = [];
+        if (lead) parts.push(`${describeNoise(lead)} at the start`);
+        if (trail) parts.push(`${describeNoise(trail)} at the end`);
+        return parts.join(' and ');
+    }
+
+    function onPasswordPaste(e) {
+        const pasted = e.clipboardData && e.clipboardData.getData('text/plain');
+        if (!pasted) return;
+
+        const { lead, core, trail } = splitEdges(pasted);
+        if (!lead && !trail) return; // Nothing to clean up, let the browser paste normally
+
+        e.preventDefault();
+        const before = passwordInput.value;
+        const start = passwordInput.selectionStart ?? before.length;
+        const end = passwordInput.selectionEnd ?? start;
+        passwordInput.setRangeText(core, start, end, 'end');
+
+        pasteFix = {
+            lead,
+            trail,
+            trimmedValue: passwordInput.value,
+            originalValue: before.slice(0, start) + pasted + before.slice(end)
+        };
+        onPasswordChange();
+    }
+
+    function onPasswordNoticeAction() {
+        if (pasteFix) {
+            // "Keep as pasted": put the whitespace back. The browser still drops
+            // line breaks, as a single-line field can't hold them anyway.
+            passwordInput.value = pasteFix.originalValue;
+            pasteFix = null;
+        } else {
+            passwordInput.value = splitEdges(passwordInput.value).core;
+        }
+        passwordInput.focus();
+        onPasswordChange();
+    }
+
+    function onPasswordChange() {
+        updatePasswordNotice();
+        updateButtonState();
+    }
+
+    function updatePasswordNotice() {
+        const value = passwordInput.value;
+        if (pasteFix && value !== pasteFix.trimmedValue) {
+            pasteFix = null;
+        }
+
+        if (pasteFix) {
+            const canRestore = pasteFix.originalValue.replace(/[\r\n]/g, '') !== pasteFix.trimmedValue;
+            showPasswordNotice(
+                'info',
+                `Removed ${describeEdges(pasteFix.lead, pasteFix.trail)} of the pasted password.`,
+                canRestore ? 'Keep as pasted' : null
+            );
+            passwordInput.classList.remove('has-noise');
+            return;
+        }
+
+        const { lead, trail } = splitEdges(value);
+        if (lead || trail) {
+            showPasswordNotice(
+                'warning',
+                `Password has ${describeEdges(lead, trail)} \u2013 probably copy-paste noise.`,
+                'Trim'
+            );
+            passwordInput.classList.add('has-noise');
+        } else {
+            passwordNotice.hidden = true;
+            passwordInput.classList.remove('has-noise');
+        }
+    }
+
+    function showPasswordNotice(type, message, actionLabel) {
+        passwordNotice.className = `password-notice ${type}`;
+        passwordNoticeText.textContent = message;
+        passwordNoticeAction.textContent = actionLabel || '';
+        passwordNoticeAction.hidden = !actionLabel;
+        passwordNotice.hidden = false;
+    }
 
     function handleFileSelect(file) {
         const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
@@ -263,12 +431,12 @@
 
             downloadFile(resultBlob, `unlocked_${currentFile.name}`);
             setStatus('Success! File downloaded.', 'success');
-            passwordInput.value = ''; 
+            passwordInput.value = '';
         } catch (error) {
             console.error(error);
             setStatus(`Error: ${error.message || 'Processing failed'}`, 'error');
         } finally {
-            updateButtonState();
+            onPasswordChange();
         }
     }
 
